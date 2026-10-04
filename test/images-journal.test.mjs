@@ -326,18 +326,123 @@ test('codex: a relative reference is attached as the absolute project file', asy
   } finally { restore(); }
 });
 
-test('one operationId with the same relative reference in another project is a different request, never a replay', async () => {
+test('one operationId with the same relative reference in another project is that project\'s own operation, never a replay', async () => {
   const { deps, env, dir } = await sandbox('openai', { SPRENG_IMAGES_OPENAI_KEY: OPENAI_KEY });
   const { projectA, projectB, restore } = await twoProjects(dir);
   try {
     let posts = 0;
-    deps.fetch = async () => { posts++; return res(200, { data: [{ b64_json: b64('image for A') }] }); };
+    deps.fetch = async (_url, init) => { posts++; return res(200, { data: [{ b64_json: b64(`image ${posts} from ${Buffer.from(await init.body.get('image[]').arrayBuffer())}`) }] }); };
     await callTool('make_image', { prompt: 'p', references: ['brand/logo.png'], operationId: 'shared-id', outPath: 'ad.png' }, { ...deps, env: { ...env, CLAUDE_PROJECT_DIR: projectA } });
-    await assert.rejects(
-      callTool('make_image', { prompt: 'p', references: ['brand/logo.png'], operationId: 'shared-id', outPath: 'ad.png' }, { ...deps, env: { ...env, CLAUDE_PROJECT_DIR: projectB } }),
-      /already used for a different image request/,
-    );
-    assert.equal(posts, 1);
-    await assert.rejects(fs.access(path.join(projectB, 'ad.png')), 'project B never receives project A\'s image');
+    const b = await callTool('make_image', { prompt: 'p', references: ['brand/logo.png'], operationId: 'shared-id', outPath: 'ad.png' }, { ...deps, env: { ...env, CLAUDE_PROJECT_DIR: projectB } });
+    assert.equal(posts, 2);
+    assert.equal(b.replayed, undefined);
+    assert.equal(String(await fs.readFile(path.join(projectA, 'ad.png'))), 'image 1 from logo-A');
+    assert.equal(String(await fs.readFile(path.join(projectB, 'ad.png'))), 'image 2 from logo-B');
   } finally { restore(); }
+});
+
+// ---------- operation ids are scoped by project ----------
+
+/** Two project folders that share one plugin data folder (one journal). */
+async function projectsAB(dir) {
+  const A = path.join(dir, 'client-A');
+  const B = path.join(dir, 'client-B');
+  await fs.mkdir(A, { recursive: true });
+  await fs.mkdir(B, { recursive: true });
+  return { A, B };
+}
+const inProject = (deps, env, project) => ({ ...deps, env: { ...env, CLAUDE_PROJECT_DIR: project } });
+
+for (const refs of [[], ['https://cdn.example/shared-logo.png']]) {
+  const label = refs.length ? 'with the same link reference' : 'without references';
+  test(`openai: one explicit operationId in two projects, ${label}, makes one image per project and never replays across`, async () => {
+    const { deps, env, dir } = await sandbox('openai', { SPRENG_IMAGES_OPENAI_KEY: OPENAI_KEY });
+    const { A, B } = await projectsAB(dir);
+    let posts = 0;
+    deps.fetch = async (url) => {
+      if (url.startsWith('https://cdn.example/')) return res(200, null);
+      posts++;
+      return res(200, { data: [{ b64_json: b64(`image-${posts}`) }] });
+    };
+    const args = { prompt: 'same prompt', references: refs, operationId: 'shared-claim', outPath: 'ad.png' };
+    const a = await callTool('make_image', args, inProject(deps, env, A));
+    const b = await callTool('make_image', args, inProject(deps, env, B));
+    assert.equal(posts, 2, 'project B paid for its own image');
+    assert.equal(b.replayed, undefined, 'project B never receives a replay of project A');
+    assert.equal(await fs.realpath(path.dirname(b.path)), await fs.realpath(B));
+    assert.equal(String(await fs.readFile(path.join(A, 'ad.png'))), 'image-1');
+    assert.equal(String(await fs.readFile(path.join(B, 'ad.png'))), 'image-2');
+    // Each project's own repeat replays its own image and buys nothing.
+    const a2 = await callTool('make_image', args, inProject(deps, env, A));
+    const b2 = await callTool('make_image', args, inProject(deps, env, B));
+    assert.equal(posts, 2);
+    assert.equal(a2.path, a.path);
+    assert.equal(b2.replayed, true);
+    assert.equal(await fs.realpath(path.dirname(b2.path)), await fs.realpath(B));
+  });
+}
+
+test('codex: one explicit operationId in two projects runs codex once per project and never replays across', async () => {
+  const { deps, env, dir } = await sandbox('codex');
+  const { A, B } = await projectsAB(dir);
+  let n = 0;
+  deps.run = async () => {
+    const i = ++n;
+    const made = path.join(env.CODEX_HOME, 'generated_images', `t${i}`, 'exec.png');
+    await fs.mkdir(path.dirname(made), { recursive: true });
+    await fs.writeFile(made, `codex-${i}`);
+    return { code: 0, stdout: `{"type":"thread.started","thread_id":"t${i}"}\n`, stderr: '' };
+  };
+  const args = { prompt: 'same prompt', operationId: 'shared-claim', outPath: 'ad.png' };
+  await callTool('make_image', args, inProject(deps, env, A));
+  const b = await callTool('make_image', args, inProject(deps, env, B));
+  assert.equal(n, 2);
+  assert.equal(b.replayed, undefined);
+  assert.equal(String(await fs.readFile(path.join(A, 'ad.png'))), 'codex-1');
+  assert.equal(String(await fs.readFile(path.join(B, 'ad.png'))), 'codex-2');
+});
+
+test('kie: one explicit operationId in two projects creates one task per project; collecting one task id is per project too', async () => {
+  const { deps, env, dir } = await sandbox('kie', { SPRENG_IMAGES_KIE_KEY: KIE_KEY });
+  const { A, B } = await projectsAB(dir);
+  let creates = 0;
+  deps.fetch = async (url) => {
+    if (url.endsWith('/createTask')) { creates++; return res(200, { code: 200, data: { taskId: `task-${creates}` } }); }
+    if (url.includes('/recordInfo')) {
+      const id = new URL(url).searchParams.get('taskId');
+      return res(200, { data: { state: 'success', resultJson: { resultUrls: [`https://tempfile.example/${id}.png`] } } });
+    }
+    const id = url.split('/').pop();
+    return { ...res(200, null), arrayBuffer: async () => Buffer.from(`kie ${id}`) };
+  };
+  const args = { prompt: 'same prompt', references: ['https://cdn.example/shared-logo.png'], operationId: 'shared-claim', outPath: 'ad.png' };
+  await callTool('make_image', args, inProject(deps, env, A));
+  const b = await callTool('make_image', args, inProject(deps, env, B));
+  assert.equal(creates, 2);
+  assert.equal(b.replayed, undefined);
+  assert.equal(String(await fs.readFile(path.join(A, 'ad.png'))), 'kie task-1.png');
+  assert.equal(String(await fs.readFile(path.join(B, 'ad.png'))), 'kie task-2.png');
+  // Collecting one task id in project A, then in project B: B's file is saved in B, never at A's path.
+  const ca = await callTool('make_image', { prompt: 'p', kieTaskId: 'task_9', outPath: 'collected.png' }, inProject(deps, env, A));
+  const cb = await callTool('make_image', { prompt: 'p', kieTaskId: 'task_9', outPath: 'collected.png' }, inProject(deps, env, B));
+  assert.equal(await fs.realpath(path.dirname(ca.path)), await fs.realpath(A));
+  assert.equal(await fs.realpath(path.dirname(cb.path)), await fs.realpath(B));
+  assert.equal(String(await fs.readFile(path.join(B, 'collected.png'))), 'kie task_9.png');
+  assert.equal(creates, 2, 'collecting never creates');
+});
+
+test('the operation fingerprint includes the reference content: the same id after the project file changed is refused before any call', async () => {
+  const { deps, env, dir } = await sandbox('openai', { SPRENG_IMAGES_OPENAI_KEY: OPENAI_KEY });
+  const { A } = await projectsAB(dir);
+  await fs.mkdir(path.join(A, 'brand'), { recursive: true });
+  await fs.writeFile(path.join(A, 'brand', 'logo.png'), 'logo v1');
+  let posts = 0;
+  deps.fetch = async () => { posts++; return res(200, { data: [{ b64_json: b64('img') }] }); };
+  const args = { prompt: 'p', references: ['brand/logo.png'], operationId: 'ref-hash', outPath: 'ad.png' };
+  await callTool('make_image', args, inProject(deps, env, A));
+  const again = await callTool('make_image', args, inProject(deps, env, A));
+  assert.equal(again.replayed, true, 'the unchanged file replays');
+  await fs.writeFile(path.join(A, 'brand', 'logo.png'), 'logo v2');
+  await assert.rejects(callTool('make_image', args, inProject(deps, env, A)), /already used for a different image request/);
+  assert.equal(posts, 1);
 });

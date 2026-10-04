@@ -99,7 +99,7 @@ export const TOOLS = [
   {
     name: 'make_image',
     title: 'Make one image with the chosen source',
-    description: 'Makes one image from the prompt as given with the image source the user chose, and saves the file on this computer. Uses the user\'s own Codex plan or their own OpenAI or KIE account, which may cost them on that account. One operationId buys at most one image: the same operationId again returns what is kept instead of paying again, and an unclear outcome is reported, not retried. Then upload the file to Spreng with create_native_image_upload as usual.',
+    description: 'Makes one image from the prompt as given with the image source the user chose, and saves the file on this computer. Uses the user\'s own Codex plan or their own OpenAI or KIE account, which may cost them on that account. One operationId buys at most one image in each project: the same operationId again in that project returns what is kept instead of paying again, and an unclear outcome is reported, not retried. Then upload the file to Spreng with create_native_image_upload as usual.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -109,7 +109,7 @@ export const TOOLS = [
         aspectRatio: { type: 'string', description: 'For KIE, such as 1:1 or 9:16.' },
         size: { type: 'string', description: 'For OpenAI, such as 1024x1024 or auto.' },
         kieTaskId: { type: 'string', description: 'Collect a KIE task that was still running, instead of starting a new one.' },
-        operationId: { type: 'string', description: 'Names this image purchase; pass the Spreng claim id. One operationId buys at most one image on OpenAI or KIE: the same operationId again returns the image already made (or collects the KIE task already accepted, or reports an unclear or failed outcome) and never pays again. For another image, use a new operationId. Without one, the same request in the same project is treated as the same operation.' },
+        operationId: { type: 'string', description: 'Names this image purchase; pass the Spreng claim id. One operationId buys at most one image in each project: the same operationId again in that project returns the image already made (or collects the KIE task already accepted, or reports an unclear or failed outcome) and never pays again. For another image, use a new operationId. Without one, the same request in the same project is treated as the same operation.' },
       },
       required: ['prompt'],
       additionalProperties: false,
@@ -148,8 +148,8 @@ export async function callTool(name, args = {}, deps = defaultDeps()) {
     if (typeof args.prompt !== 'string' || !args.prompt.trim()) throw new Error('prompt is required.');
     const stamp = deps.now().toISOString().replace(/[:.]/g, '-');
     const unique = `${stamp}-${randomUUID().slice(0, 8)}`;
-    // The canonical project folder: it names the project in derived operation ids, so one project never receives
-    // another project's image from the shared journal.
+    // The canonical project folder: every operation is kept under this folder and its operation id (and the folder is
+    // part of its fingerprint), so one project never receives another project's image from the shared journal.
     const project = await canonicalDir(deps.fs, projectDir(env));
     const outPath = path.resolve(projectDir(env), args.outPath || path.join('spreng-images', `${unique}.png`));
     if (choice.source === 'other') return runOther({ otherName: choice.otherName, outPath });

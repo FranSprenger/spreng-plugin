@@ -17,6 +17,11 @@
 // be started), and a lost status check while collecting a KIE task by its id (collecting buys nothing). Once codex
 // has started, any failure is kept as uncertain, since it may already have made the image. Another image needs a
 // new operation id.
+//
+// Operation ids are scoped by project: the record is found by the canonical project folder AND the operation id,
+// and the fingerprint holds the project, the prompt and a hash of each reference (the content of a local file, the
+// link itself for a URL). The same operation id in another project is that project's own operation, so one
+// project never receives another project's kept image.
 
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -40,6 +45,25 @@ export function fingerprintOf(request) {
   return sha(JSON.stringify(request));
 }
 
+/** One hash per reference: the content of a local file (read now, before anything is sent), or the link itself. */
+export async function referenceHashes(deps, references = []) {
+  const out = [];
+  for (const [i, ref] of references.entries()) {
+    if (/^https?:\/\//i.test(ref)) { out.push(sha('url:' + ref)); continue; }
+    let data;
+    try { data = await deps.fs.readFile(ref); } catch (e) { throw new Error(`reference ${i + 1} (${ref}) could not be read: ${e.message}; nothing was sent.`); }
+    out.push(sha(data));
+  }
+  return out;
+}
+
+/** The fingerprint of a request in a project: the project, the prompt, the reference hashes and the route's fields. */
+export async function requestFingerprint(deps, job, fields) {
+  return fingerprintOf({
+    ...fields, project: job.projectDir || null, prompt: job.prompt, references: await referenceHashes(deps, job.references),
+  });
+}
+
 async function writeAtomic(deps, file, data) {
   const tmp = `${file}.${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`;
   await deps.fs.writeFile(tmp, data);
@@ -50,9 +74,10 @@ async function writeAtomic(deps, file, data) {
  * Reserve an operation before the paid call. Returns { fresh: true } when this call owns it, or { fresh: false }
  * with the kept record when the operation already exists.
  */
-export async function reserveOperation(deps, stateDir, { operationId, fingerprint, provider }) {
-  const file = path.join(stateDir, `${sha('op:' + operationId).slice(0, 32)}.json`);
-  const record = { operationId, provider, fingerprint, state: 'submitting', reservedAt: deps.now().toISOString() };
+export async function reserveOperation(deps, stateDir, { project, operationId, fingerprint, provider }) {
+  const scope = project || null;
+  const file = path.join(stateDir, `${sha(JSON.stringify(['op', scope, operationId])).slice(0, 32)}.json`);
+  const record = { operationId, project: scope, provider, fingerprint, state: 'submitting', reservedAt: deps.now().toISOString() };
   await deps.fs.mkdir(stateDir, { recursive: true });
   try {
     await deps.fs.writeFile(file, JSON.stringify(record, null, 2), { flag: 'wx' });
@@ -64,6 +89,9 @@ export async function reserveOperation(deps, stateDir, { operationId, fingerprin
   try { saved = JSON.parse(await deps.fs.readFile(file, 'utf8')); } catch { saved = null; }
   if (!saved) {
     throw new Error(`Operation ${operationId} is in progress in another call (its record is being written); it was not sent again.`);
+  }
+  if ((saved.project ?? null) !== scope) {
+    throw new Error(`Operation ${operationId} belongs to another project; nothing was sent and nothing from that project was used.`);
   }
   if (saved.fingerprint !== fingerprint) {
     throw new Error(`Operation ${operationId} was already used for a different image request; nothing was sent. Use a new operationId for a new image.`);

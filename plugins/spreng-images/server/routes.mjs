@@ -19,7 +19,7 @@
 
 import path from 'node:path';
 import {
-  operationIdFor, fingerprintOf, reserveOperation, updateOperation, releaseOperation, markUncertain, markFailed,
+  operationIdFor, fingerprintOf, requestFingerprint, reserveOperation, updateOperation, releaseOperation, markUncertain, markFailed,
   completeOperation, replayOperation,
 } from './operations.mjs';
 
@@ -86,8 +86,9 @@ export function codexTask(prompt) {
 export async function runCodex(job, deps) {
   const { prompt, references = [], tmpDir, stateDir } = job;
   const op = await reserveOperation(deps, stateDir, {
+    project: job.projectDir,
     operationId: operationIdFor(job, 'codex', 'codex'),
-    fingerprint: fingerprintOf({ source: 'codex', prompt, references }),
+    fingerprint: await requestFingerprint(deps, job, { source: 'codex' }),
     provider: 'Codex CLI',
   });
   if (!op.fresh) return replayOperation(deps, op);
@@ -147,8 +148,9 @@ export async function runOpenAI(job, deps, { key, model }) {
   const { prompt, references = [], tmpDir, size, stateDir } = job;
   if (!key) throw new Error('No OpenAI key is set. Run /plugin configure spreng-images@spreng and enter it there (never in the chat).');
   const op = await reserveOperation(deps, stateDir, {
+    project: job.projectDir,
     operationId: operationIdFor(job, 'openai', model),
-    fingerprint: fingerprintOf({ source: 'openai', model, prompt, references, size: size || null }),
+    fingerprint: await requestFingerprint(deps, job, { source: 'openai', model, size: size || null }),
     provider: 'OpenAI',
   });
   if (!op.fresh) return replayOperation(deps, op);
@@ -218,8 +220,9 @@ export async function runKie(job, deps, { key, model, pollMs = 5000, maxPolls = 
   if (kieTaskId) return collectKie(job, deps, { auth, model, pollMs, maxPolls });
 
   const op = await reserveOperation(deps, stateDir, {
+    project: job.projectDir,
     operationId: operationIdFor(job, 'kie', model),
-    fingerprint: fingerprintOf({ source: 'kie', model, prompt, references, aspectRatio: aspectRatio || null }),
+    fingerprint: await requestFingerprint(deps, job, { source: 'kie', model, aspectRatio: aspectRatio || null }),
     provider: 'KIE',
   });
   let taskId;
@@ -261,8 +264,9 @@ export async function runKie(job, deps, { key, model, pollMs = 5000, maxPolls = 
 async function collectKie(job, deps, { auth, model, pollMs, maxPolls }) {
   const { kieTaskId, stateDir } = job;
   const op = await reserveOperation(deps, stateDir, {
+    project: job.projectDir,
     operationId: `kie-task-${kieTaskId}`,
-    fingerprint: fingerprintOf({ source: 'kie', collect: String(kieTaskId) }),
+    fingerprint: fingerprintOf({ source: 'kie', collect: String(kieTaskId), project: job.projectDir || null }),
     provider: 'KIE',
   });
   if (!op.fresh) return replayOperation(deps, op);
