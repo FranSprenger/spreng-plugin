@@ -48,7 +48,9 @@
 // the image was made. For a record they left submitting, uncertain or failed, the model is recovered (recoveredModels):
 // every image model name OpenAI and KIE have offered (KNOWN_MODELS) and every word in the record are tried, and the
 // one with which this request derives the id the record holds is its model, so the record is found under that id
-// (above) even after its model setting was removed or replaced. A record whose id no candidate derives is another
+// (above) even after its model setting was removed or replaced. Every model this version has seen configured (kept in
+// models-seen/ when the server starts and on every call) is tried too, so a model name of the user's own that no list
+// and no record text holds is still found after its setting is removed. A record whose id no candidate derives is another
 // request's (or made with a name this lookup cannot recover): it is left alone and blocks nothing, as does a record
 // elsewhere in the journal that cannot be read. Only a record found under an id the request derives (or its given id)
 // refuses it, also when that record cannot be read. This version keeps the model in every record.
@@ -158,12 +160,55 @@ const JOURNAL_DIRS = ['operations', 'kie-operations'];
  * the models the kept records name or were recovered for, see recoveredModels).
  */
 function identities(env = {}, model, recorded = []) {
-  const models = new Set([DEFAULT_MODELS.openai, DEFAULT_MODELS.kie, model, ...recorded]);
+  const models = new Set([DEFAULT_MODELS.openai, DEFAULT_MODELS.kie, model, ...recorded, ...configuredModels(env)]);
+  return [{ source: 'codex', model: DEFAULT_MODELS.codex }, ...paidIdentities(models)];
+}
+
+/** The OpenAI and KIE models configured now (a setting Claude Code did not fill in is left out). */
+function configuredModels(env = {}) {
+  const out = [];
   for (const name of MODEL_SETTINGS) {
     const v = typeof env[name] === 'string' ? env[name].trim() : '';
-    if (v && !v.startsWith('${')) models.add(v);
+    if (v && !v.startsWith('${')) out.push(v);
   }
-  return [{ source: 'codex', model: DEFAULT_MODELS.codex }, ...paidIdentities(models)];
+  return out;
+}
+
+// Every model this version has seen configured, one file per model name, next to the journal folders
+// (models-seen/), so a model setting removed since is still tried (see earlierRecords).
+const SEEN_DIR = 'models-seen';
+
+/**
+ * Keep every model configured now in models-seen/ of the plugin data folder (root). Each name is its own file made
+ * exclusively, so two calls at the same moment never drop a name. Run when the server starts and on every tool call.
+ */
+export async function rememberModels(deps, root) {
+  const models = configuredModels(deps.env);
+  if (!models.length) return;
+  const dir = path.join(root, SEEN_DIR);
+  await deps.fs.mkdir(dir, { recursive: true });
+  for (const model of models) {
+    try {
+      await deps.fs.writeFile(path.join(dir, `${sha('model:' + model).slice(0, 32)}.json`), JSON.stringify({ model, seenAt: deps.now().toISOString() }), { flag: 'wx' });
+    } catch (e) {
+      if (e.code !== 'EEXIST') throw e;
+    }
+  }
+}
+
+/** Every model kept in models-seen/ (a file that cannot be read is skipped). */
+async function seenModels(deps, root) {
+  let names;
+  try { names = await deps.fs.readdir(path.join(root, SEEN_DIR)); } catch (e) {
+    if (e.code === 'ENOENT') return [];
+    throw e;
+  }
+  const out = [];
+  for (const name of names.filter((n) => n.endsWith('.json'))) {
+    const kept = await readRecord(deps, path.join(root, SEEN_DIR, name));
+    if (typeof kept?.model === 'string' && kept.model) out.push(kept.model);
+  }
+  return out;
 }
 
 /** OpenAI and KIE, each with every model given (a model name set for one source may have been set for the other). */
@@ -358,8 +403,11 @@ export async function reserveOperation(deps, { job, model, fingerprint, legacy, 
   const file = scopedFile(stateDir, scope, operationId);
   // A request without an operationId is looked up under every model a kept record names or was recovered for, so the
   // journal is read first.
-  const journal = job.operationId ? [] : await journalRecords(deps, path.dirname(stateDir));
-  const recorded = [...journal.map((e) => recordedModel(e.record)).filter(Boolean), ...recoveredModels(job, journal)];
+  const root = path.dirname(stateDir);
+  const journal = job.operationId ? [] : await journalRecords(deps, root);
+  if (!job.operationId) await rememberModels(deps, root).catch(() => {}); // best effort: the journal check below still runs
+  const seen = job.operationId ? [] : await seenModels(deps, root);
+  const recorded = [...journal.map((e) => recordedModel(e.record)).filter(Boolean), ...recoveredModels(job, journal), ...seen];
   const earlier = earlierRecords(job, deps.env, model, recorded).filter((e) => e.file !== file);
   const record = { operationId, project: scope, provider, model, fingerprint, state: 'submitting', reservedAt: deps.now().toISOString() };
   await deps.fs.mkdir(stateDir, { recursive: true });

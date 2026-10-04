@@ -12,7 +12,7 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { SOURCES, secret, runCodex, runOpenAI, runKie, runOther } from './routes.mjs';
-import { canonicalPath, DEFAULT_MODELS } from './operations.mjs';
+import { canonicalPath, DEFAULT_MODELS, rememberModels } from './operations.mjs';
 
 /** Run a program without a shell; resolves with its exit code and output. */
 export function runProcess(cmd, args, { timeoutMs } = {}) {
@@ -108,6 +108,8 @@ export const TOOLS = [
 
 export async function callTool(name, args = {}, deps = defaultDeps()) {
   const env = deps.env;
+  // Every model configured is kept, so an earlier record made with it is still found after the setting is removed.
+  await rememberModels(deps, dataDir(env)).catch(() => {});
   if (name === 'image_source_status') {
     const choice = await readChoice(deps);
     return {
@@ -176,6 +178,7 @@ export function scrub(text, env) {
 export async function handle(msg, deps = defaultDeps()) {
   const { id, method, params } = msg;
   if (method === 'initialize') {
+    await rememberModels(deps, dataDir(deps.env)).catch(() => {});
     return { jsonrpc: '2.0', id, result: { protocolVersion: params?.protocolVersion || '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'spreng-images', version: '0.1.0' } } };
   }
   if (method === 'ping') return { jsonrpc: '2.0', id, result: {} };

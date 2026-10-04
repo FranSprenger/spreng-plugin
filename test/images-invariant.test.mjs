@@ -11,7 +11,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { callTool } from '../plugins/spreng-images/server/server.mjs';
+import { callTool, handle } from '../plugins/spreng-images/server/server.mjs';
 
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489', 'hex');
 const ENV = { SPRENG_IMAGES_OPENAI_KEY: 'sk-test-openai-0000000000000000', SPRENG_IMAGES_KIE_KEY: 'kie-test-key-1111111111111111' };
@@ -331,6 +331,34 @@ test('lookup: an earlier record without its model, made with a model setting rem
       // Another request in the same project is still made.
       const other = await retry(s, routeB, { prompt: 'another', outPath: 'b.png' });
       assert.deepEqual(other, { submissions: 1, outcome: 'returned' }, `${model} record, another request on ${routeB}`);
+    }
+  }
+});
+
+test('invariant: an earlier record without its model, made with a model name no list and no record text holds, is not bought again after this version saw the setting and it was removed', async () => {
+  // An earlier version left the record (no model field, a reason that names no model) while the user had a model of
+  // their own configured. This version then ran once with that setting (a tool call, or the server starting), and
+  // the setting was removed before the same request was retried. Another request stays usable.
+  for (const [route, model, state] of [['openai', 'acme-image-7', 'uncertain'], ['kie', 'acme-kie-3', 'submitting']]) {
+    const setting = route === 'openai' ? 'SPRENG_IMAGES_OPENAI_MODEL' : 'SPRENG_IMAGES_KIE_MODEL';
+    for (const routeB of ROUTES) {
+      for (const seenBy of ['a tool call', 'the server starting']) {
+        const s = await sandbox();
+        const args = { prompt: 'p', outPath: 'ad.png' };
+        const id = autoId({ source: route, model, project: s.project, prompt: 'p', references: [], aspectRatio: null, size: null, outPath: 'ad.png' });
+        const rec = legacyRecord(route, state, s.A, legacyFingerprint(route, 'p', [], { ...MODEL, [route]: model }));
+        if (state === 'uncertain') rec.reason = 'socket hang up';
+        await seed(s.env, 'operations', id, rec);
+        s.env[setting] = model;
+        if (seenBy === 'a tool call') await callTool('image_source_status', {}, s.deps);
+        else await handle({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }, s.deps);
+        delete s.env[setting];
+        const r = await retry(s, routeB, args);
+        assert.equal(r.submissions, 0, `${model} ${route} record seen by ${seenBy}, retry on ${routeB}: ${r.outcome}`);
+        assert.match(r.outcome, /^refused: /);
+        const other = await retry(s, routeB, { prompt: 'another', outPath: 'b.png' });
+        assert.deepEqual(other, { submissions: 1, outcome: 'returned' }, `${model} record, another request on ${routeB}`);
+      }
     }
   }
 });
