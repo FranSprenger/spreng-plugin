@@ -69,6 +69,26 @@ async function seed(env, dirName, operationId, record, image) {
   await fs.writeFile(`${base}.json`, JSON.stringify(rec, null, 2));
 }
 
+/** A record as d107deb to 0a199a1 wrote it: operations/, file named by sha(['op', project, id]), the project in the record. */
+async function seedScoped(s, operationId, record, image) {
+  const dir = path.join(s.env.CLAUDE_PLUGIN_DATA, 'operations');
+  await fs.mkdir(dir, { recursive: true });
+  const base = path.join(dir, sha(JSON.stringify(['op', s.project, operationId])).slice(0, 32));
+  const rec = { operationId, ...record };
+  if (image) {
+    await fs.writeFile(`${base}.image`, image);
+    Object.assign(rec, { resultFile: `${base}.image`, resultSha256: sha(image) });
+  }
+  await fs.writeFile(`${base}.json`, JSON.stringify(rec, null, 2));
+}
+
+/** The fingerprint d107deb to 0a199a1 gave a request: the route's fields, the project, the prompt, a hash per reference. */
+function scopedFingerprint(s, route, args) {
+  const hashes = (args.references || []).map((r) => (/^https?:\/\//i.test(r) ? sha('url:' + r) : sha('logo')));
+  const fields = route === 'codex' ? { source: 'codex' } : route === 'openai' ? { source: 'openai', model: MODEL.openai, size: null } : { source: 'kie', model: MODEL.kie, aspectRatio: null };
+  return sha(JSON.stringify({ ...fields, project: s.project, prompt: args.prompt, references: hashes }));
+}
+
 /** The fingerprint the earlier journal gave a request on a route (references as that version saw them). */
 function legacyFingerprint(route, prompt, references) {
   if (route === 'codex') return sha(JSON.stringify({ source: 'codex', prompt, references }));
@@ -88,6 +108,8 @@ function legacyRecord(route, state, A, fingerprint) {
 /** Run this version on route A with a given outcome, leaving its record in the journal. */
 async function writeWithThisVersion(s, route, outcome, args) {
   await callTool('set_image_source', { source: route }, s.deps);
+  // Reference links download on every route (codex and OpenAI take files); only the paid calls below have outcomes.
+  s.deps.fetch = async () => res(200, null);
   if (route === 'codex') {
     s.deps.run = outcome === 'completed'
       ? async () => {
@@ -101,7 +123,7 @@ async function writeWithThisVersion(s, route, outcome, args) {
   if (route === 'openai') {
     s.deps.fetch = outcome === 'completed'
       ? async () => res(200, { data: [{ b64_json: PNG.toString('base64') }] })
-      : async () => { throw new Error('socket hang up'); };
+      : async (url, init = {}) => { if (init.method === 'POST') throw new Error('socket hang up'); return res(200, null); };
   }
   if (route === 'kie') {
     s.deps.fetch = async (url) => {
@@ -147,7 +169,16 @@ function writers() {
         derivedId: (s, args) => autoId({ source: route, model: MODEL[route], project: s.project, prompt: args.prompt, references: resolved(s, args), aspectRatio: null, size: null, outPath: args.outPath }) });
     }
   }
-  // d107deb to this version: operations/, keyed by project and id; made by running this version.
+  // d107deb to 0a199a1: operations/, file named by sha(['op', project, id]), the id derived with the route's source and
+  // model (references resolved against the project), the record holding the project and the current fingerprint.
+  for (const route of ROUTES) {
+    for (const state of states[route]) {
+      out.push({ name: `d107deb..0a199a1 ${route} ${state}`, route,
+        write: async (s, args, id) => seedScoped(s, id, { ...legacyRecord(route, state, s.A, scopedFingerprint(s, route, args)), project: s.project }, state === 'completed' ? PNG : null),
+        derivedId: (s, args) => autoId({ source: route, model: MODEL[route], project: s.project, prompt: args.prompt, references: resolved(s, args), aspectRatio: null, size: null, outPath: args.outPath }) });
+    }
+  }
+  // This version: made by running it.
   for (const route of ROUTES) {
     for (const outcome of thisVersion[route]) out.push({ name: `this version ${route} ${outcome}`, route, live: (s, args) => writeWithThisVersion(s, route, outcome, args) });
   }
@@ -177,19 +208,78 @@ test('invariant: a recorded operation is never submitted again, for every (versi
       pairs++;
       if (submissions !== 0) failures.push(`${w.name} -> retry on ${routeB} with operationId: ${submissions} new submission(s) (${outcome})`);
     }
-    // 2) The same request without an operationId, retried on its own route: the id is derived again, under every
-    // form an earlier version derived it (with no reference, and with a local reference given as typed).
-    const refVariants = w.route === 'kie' ? [[], ['https://cdn.example/logo.png']] : [[], ['logo.png']];
+    // 2) The same request without an operationId, retried on every route that takes its references (the user switched
+    // image source in between): the id is derived again, under every form any version derived it, for every route.
+    // References: none, a link (every route takes links) and a local file as typed (codex and OpenAI only; KIE takes
+    // links only).
+    const refVariants = [[], ['https://cdn.example/logo.png'], ...(w.route === 'kie' ? [] : [['logo.png']])];
     for (const references of refVariants) {
-      const s = await sandbox();
-      const args = { prompt: 'p', outPath: 'ad.png', ...(references.length ? { references } : {}) };
-      if (w.live) await w.live(s, args);
-      else await w.write(s, args, w.derivedId(s, args), w.refs === 'resolved' ? resolved(s, args) : references);
-      const { submissions, outcome } = await retry(s, w.route, args);
-      pairs++;
-      if (submissions !== 0) failures.push(`${w.name} -> retry on ${w.route} without operationId, references ${JSON.stringify(references)}: ${submissions} new submission(s) (${outcome})`);
+      for (const routeB of ROUTES) {
+        if (routeB === 'kie' && references.some((r) => !/^https:\/\//.test(r))) continue;
+        const s = await sandbox();
+        const args = { prompt: 'p', outPath: 'ad.png', ...(references.length ? { references } : {}) };
+        if (w.live) await w.live(s, args);
+        else await w.write(s, args, w.derivedId(s, args), w.refs === 'resolved' ? resolved(s, args) : references);
+        const { submissions, outcome } = await retry(s, routeB, args);
+        pairs++;
+        if (submissions !== 0) failures.push(`${w.name} -> retry on ${routeB} without operationId, references ${JSON.stringify(references)}: ${submissions} new submission(s) (${outcome})`);
+      }
     }
   }
-  assert.ok(pairs > 100, `the matrix ran (${pairs} pairs)`);
+  assert.ok(pairs > 400, `the matrix ran (${pairs} pairs)`);
   assert.deepEqual(failures, [], `${failures.length} of ${pairs} pairs bought the same operation again:\n${failures.join('\n')}`);
+});
+
+test('invariant: a request made with a configured (non-default) KIE model is not bought again on OpenAI, from this version or the first journal', async () => {
+  const MODEL_KIE = 'seedream-v4';
+  for (const writer of ['this version', 'f0e3ddf']) {
+    const s = await sandbox();
+    s.env.SPRENG_IMAGES_KIE_MODEL = MODEL_KIE;
+    const args = { prompt: 'p', outPath: 'ad.png' };
+    if (writer === 'this version') {
+      await callTool('set_image_source', { source: 'kie' }, s.deps);
+      s.deps.fetch = async (url) => {
+        if (String(url).endsWith('/createTask')) return res(200, { code: 200, data: { taskId: 'task-a' } });
+        throw new Error('status check lost');
+      };
+      await callTool('make_image', args, s.deps).catch(() => {});
+    } else {
+      await seed(s.env, 'operations', autoId({ source: 'kie', model: MODEL_KIE, prompt: 'p', references: [], aspectRatio: null, size: null, outPath: 'ad.png' }), {
+        provider: 'KIE', fingerprint: sha(JSON.stringify({ source: 'kie', model: MODEL_KIE, prompt: 'p', references: [], aspectRatio: null })), state: 'accepted', taskId: 'task-old', model: MODEL_KIE,
+      });
+    }
+    const { submissions, outcome } = await retry(s, 'openai', args);
+    assert.equal(submissions, 0, `${writer}: ${outcome}`);
+  }
+});
+
+test('invariant: the same request sent at the same moment on two routes buys one image', async () => {
+  const { runOpenAI, runKie } = await import('../plugins/spreng-images/server/routes.mjs');
+  const s = await sandbox();
+  const count = countingProviders(s.env, s.deps);
+  const stateDir = path.join(s.env.CLAUDE_PLUGIN_DATA, 'operations');
+  const job = async (name) => {
+    const tmpDir = path.join(s.dir, `work-${name}`);
+    await fs.mkdir(tmpDir, { recursive: true });
+    return { prompt: 'p', references: [], typedReferences: [], outPath: path.join(s.A, 'ad.png'), tmpDir, requestedOutPath: 'ad.png', projectDir: s.project, stateDir };
+  };
+  const results = await Promise.allSettled([
+    runOpenAI(await job('a'), s.deps, { key: ENV.SPRENG_IMAGES_OPENAI_KEY, model: MODEL.openai }),
+    runKie(await job('b'), s.deps, { key: ENV.SPRENG_IMAGES_KIE_KEY, model: MODEL.kie, pollMs: 0 }),
+  ]);
+  assert.equal(count.submissions, 1, `one paid submission in all: ${results.map((r) => r.status === 'fulfilled' ? 'made' : r.reason.message.slice(0, 80)).join(' | ')}`);
+});
+
+test('upgrade: a request recorded by d107deb to 0a199a1 is still replayed or collected on its own route, and refused naming that provider on another', async () => {
+  for (const [route, state, expect] of [['openai', 'completed', 'replayed'], ['codex', 'completed', 'replayed'], ['kie', 'accepted', 'returned']]) {
+    const s = await sandbox();
+    const args = { prompt: 'p', outPath: 'ad.png', references: ['https://cdn.example/logo.png'] };
+    const id = autoId({ source: route, model: MODEL[route], project: s.project, prompt: 'p', references: args.references, aspectRatio: null, size: null, outPath: 'ad.png' });
+    await seedScoped(s, id, { ...legacyRecord(route, state, s.A, scopedFingerprint(s, route, args)), project: s.project }, state === 'completed' ? PNG : null);
+    const same = await retry(s, route, args);
+    assert.deepEqual(same, { submissions: 0, outcome: expect }, `${route} ${state} on its own route`);
+    const other = await retry(s, route === 'openai' ? 'kie' : 'openai', args);
+    assert.equal(other.submissions, 0);
+    assert.match(other.outcome, new RegExp(`refused: This request was already sent to ${PROVIDER[route]}`));
+  }
 });

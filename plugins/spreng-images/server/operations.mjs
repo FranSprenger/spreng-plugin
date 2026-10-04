@@ -27,31 +27,43 @@
 // provider gets that copy, so what is sent is always what was fingerprinted, even if the project file changes
 // while the request runs.
 //
-// Records from the earlier journals (one file per operation id, no project: operations/, and kie-operations/ for
-// the first KIE journal) are checked before a new record is made, by one lookup (earlierRecords) that reserveOperation
-// runs for every route: both folders, whichever provider wrote the record, under the given id or every id an
-// earlier version derived for the same request, so neither upgrading nor switching image source sends an operation
-// again. Such a record moves to this project only when its
-// file name was derived from this exact canonical project folder (an automatic id from the versions that put the
-// project in it); every other earlier record stays unresolved: the operation is refused, nothing is sent and
-// nothing from that record is used.
+// One request is one operation whichever source makes it: an automatic id (no operationId given) is derived from
+// the request alone (project, prompt, references, aspect ratio, size, outPath), never from the source or the model,
+// so every route reserves the same record and switching image source, or two routes at the same moment, never buys
+// the same request twice. Another source or model for the same request needs a new operation id.
+//
+// Records any earlier version kept are checked before a new record is made, by one lookup (earlierRecords) that
+// reserveOperation runs for every route: every folder (operations/, and kie-operations/ for the first KIE journal),
+// both file namings (one file per id; one per project and id from d107deb on), the given id or every id any version
+// derived for the same request under every source and model (the defaults and the models configured now), whichever
+// provider wrote it. Such a record moves to this project only when it is proven to be this project's (its id holds
+// this exact canonical project folder) and is the same request on the same route; a record of the same request on
+// another route refuses the operation, naming that provider; every other earlier record stays unresolved: the
+// operation is refused, nothing is sent and nothing from that record is used.
 
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 
 const sha = (data) => createHash('sha256').update(data).digest('hex');
 
+const autoId = (fields) => 'auto-' + sha(JSON.stringify(fields)).slice(0, 16);
+
 /**
- * The operation id of a request: the one given, else one derived from everything that defines the image,
- * including the project it is saved in (the journal is shared by every project on this computer).
+ * The operation id of a request: the one given, else one derived from everything that defines the image, including
+ * the project it is saved in (the journal is shared by every project on this computer) and never the source or the
+ * model (the same request on another source is the same operation).
  */
-export function operationIdFor(job, source, model) {
+export function operationIdFor(job) {
   if (job.operationId) return String(job.operationId);
-  return 'auto-' + sha(JSON.stringify({
-    source, model, project: job.projectDir || null, prompt: job.prompt, references: job.references || [], aspectRatio: job.aspectRatio || null,
+  return autoId({
+    project: job.projectDir || null, prompt: job.prompt, references: job.references || [], aspectRatio: job.aspectRatio || null,
     size: job.size || null, outPath: job.requestedOutPath || null,
-  })).slice(0, 16);
+  });
 }
+
+/** The model each source uses unless the user configured another (server.mjs); every version had these defaults. */
+export const DEFAULT_MODELS = { codex: 'codex', openai: 'gpt-image-2', kie: 'nano-banana-pro' };
+const MODEL_SETTINGS = ['SPRENG_IMAGES_OPENAI_MODEL', 'SPRENG_IMAGES_KIE_MODEL'];
 
 /** What the operation buys; the same id with a different request is refused. */
 export function fingerprintOf(request) {
@@ -122,65 +134,101 @@ async function readRecord(deps, file) {
 }
 
 const legacyFile = (dir, id) => path.join(dir, `${sha('op:' + id).slice(0, 32)}.json`);
-const autoId = (fields) => 'auto-' + sha(JSON.stringify(fields)).slice(0, 16);
+const scopedFile = (dir, scope, id) => path.join(dir, `${sha(JSON.stringify(['op', scope, id])).slice(0, 32)}.json`);
 
 // Every folder any version kept operation records in, next to each other in the plugin data folder:
 // operations/ (f0e3ddf onward, every route) and kie-operations/ (ac007f2, the first KIE journal).
 const JOURNAL_DIRS = ['operations', 'kie-operations'];
 
 /**
- * THE lookup of earlier records, the only one: every file any earlier version of this add-on could have kept for
- * this operation, in every journal folder, whichever provider wrote it, under the given operation id or under every
- * id an earlier version derived for the same request. reserveOperation runs it for every route before anything is
- * sent, so no route chooses where to look. Returns [{ file, operationId, bound }]; bound is true only for an
- * automatic id that holds this canonical project folder, the one proof that the record was made in this project
- * (a given id, or an automatic id from before the project was part of it, proves nothing about the project).
+ * Every (source, model) an earlier version could have derived an id with: codex, and OpenAI and KIE each with
+ * every model known here (the defaults, the model of this call, and the models configured now for either source).
  */
-export function earlierRecords(job, source, model) {
-  const root = path.dirname(job.stateDir);
-  const ids = [];
-  if (job.operationId) {
-    ids.push({ id: String(job.operationId), bound: false });
-  } else {
-    const { prompt } = job;
-    const project = job.projectDir || null;
-    const aspectRatio = job.aspectRatio || null;
-    const size = job.size || null;
-    const outPath = job.requestedOutPath || null;
-    const resolved = job.references || [];
-    const typed = job.typedReferences || resolved;
-    // 816c1ae (references as typed) and a15c7cd (resolved against the project): the canonical project is in the id.
-    if (project) for (const references of [resolved, typed]) ids.push({ id: autoId({ source, model, project, prompt, references, aspectRatio, size, outPath }), bound: true });
-    // f0e3ddf and 066b539: no project, references as typed.
-    ids.push({ id: autoId({ source, model, prompt, references: typed, aspectRatio, size, outPath }), bound: false });
-    // ac007f2: no source and no project (its KIE route kept these in kie-operations/).
-    ids.push({ id: autoId({ model, prompt, references: typed, aspectRatio, outPath }), bound: false });
+function identities(env = {}, model) {
+  const models = new Set([DEFAULT_MODELS.openai, DEFAULT_MODELS.kie, model]);
+  for (const name of MODEL_SETTINGS) {
+    const v = typeof env[name] === 'string' ? env[name].trim() : '';
+    if (v && !v.startsWith('${')) models.add(v);
   }
-  const out = [];
-  for (const dir of JOURNAL_DIRS.map((d) => path.join(root, d))) {
-    for (const { id, bound } of ids) {
-      const file = legacyFile(dir, id);
-      if (!out.some((e) => e.file === file)) out.push({ file, operationId: id, bound });
-    }
-  }
+  models.delete(DEFAULT_MODELS.codex);
+  models.delete(undefined);
+  const out = [{ source: 'codex', model: DEFAULT_MODELS.codex }];
+  for (const source of ['openai', 'kie']) for (const m of models) out.push({ source, model: m });
   return out;
 }
 
 /**
- * Check the earlier journals before a new record is made. A record whose id was derived from this project is moved
- * to it (the earlier files are kept); any other earlier record refuses the operation without sending anything or
- * using anything from it.
+ * THE lookup of earlier records, the only one: every file any earlier version of this add-on could have kept for
+ * this operation, in every journal folder and under both file namings, whichever provider wrote it, under the given
+ * operation id or under every id any version derived for the same request with any source and model. reserveOperation
+ * runs it for every route before anything is sent, so no route chooses where to look. Returns
+ * [{ file, operationId, bound, scoped }]: bound is true only for an automatic id that holds this canonical project
+ * folder, the one proof that the record was made in this project (a given id, or an automatic id from before the
+ * project was part of it, proves nothing about the project); scoped marks a file named by project and id
+ * (d107deb to 0a199a1), whose record holds the current fingerprint.
  */
-async function adoptLegacy(deps, { scope, operationId, fingerprint, legacy = [], earlier = [], provider, file }) {
+export function earlierRecords(job, env, model) {
+  const root = path.dirname(job.stateDir);
+  const out = [];
+  const add = (file, operationId, bound, scoped) => { if (!out.some((e) => e.file === file)) out.push({ file, operationId, bound, scoped }); };
+  if (job.operationId) {
+    // The given id: the file named by project and id is this version's own record; earlier ones were named by id.
+    const id = String(job.operationId);
+    for (const dir of JOURNAL_DIRS) add(legacyFile(path.join(root, dir), id), id, false, false);
+    return out;
+  }
+  const { prompt } = job;
+  const project = job.projectDir || null;
+  const aspectRatio = job.aspectRatio || null;
+  const size = job.size || null;
+  const outPath = job.requestedOutPath || null;
+  const resolved = job.references || [];
+  const typed = job.typedReferences || resolved;
+  const ids = [];
+  for (const { source, model: m } of identities(env, model)) {
+    if (project) {
+      // a15c7cd (named by id) and d107deb to 0a199a1 (named by project and id): references resolved against the project.
+      ids.push({ id: autoId({ source, model: m, project, prompt, references: resolved, aspectRatio, size, outPath }), bound: true, scoped: true });
+      // 816c1ae: references as typed.
+      ids.push({ id: autoId({ source, model: m, project, prompt, references: typed, aspectRatio, size, outPath }), bound: true });
+    }
+    // f0e3ddf and 066b539: no project, references as typed.
+    ids.push({ id: autoId({ source, model: m, prompt, references: typed, aspectRatio, size, outPath }), bound: false });
+    // ac007f2: no source and no project (its KIE route kept these in kie-operations/); KIE runs every model listed.
+    if (source === 'kie') ids.push({ id: autoId({ model: m, prompt, references: typed, aspectRatio, outPath }), bound: false });
+  }
+  for (const { id, bound, scoped } of ids) {
+    if (scoped) add(scopedFile(job.stateDir, project, id), id, true, true);
+    for (const dir of JOURNAL_DIRS) add(legacyFile(path.join(root, dir), id), id, bound, false);
+  }
+  return out;
+}
+
+const stateOf = (saved) => (saved?.state ? ` (${saved.state}${saved.reason ? `: ${saved.reason}` : ''}${saved.taskId ? `, task ${saved.taskId}` : ''})` : saved?.taskId ? ` (accepted, task ${saved.taskId})` : '');
+
+/** The same request was already sent through another source: refuse, naming it. */
+function sentElsewhere(saved, provider) {
+  const collect = saved.taskId && saved.state !== 'completed' && saved.state !== 'failed' ? ` Choosing ${saved.provider} again, the same request collects that task.` : '';
+  return new Error(`This request was already sent to ${saved.provider} as operation ${saved.operationId}${stateOf(saved)} in this project; nothing was sent to ${provider} and nothing was bought again.${collect} Check your ${saved.provider} account; for a new image from ${provider}, use a new operationId.`);
+}
+
+/**
+ * Check the earlier records before a new record is made. A record proven to be this project's and of the same request
+ * on the same route is moved to it (the earlier files are kept); any other earlier record refuses the operation
+ * without sending anything or using anything from it.
+ */
+async function adoptEarlier(deps, { scope, operationId, fingerprint, legacy = [], earlier = [], provider, file }) {
   for (const entry of earlier) {
     const saved = await readRecord(deps, entry.file);
     if (saved === undefined) continue;
     const via = saved?.provider || provider;
-    if (!saved || !scope || !entry.bound || saved.operationId !== entry.operationId) {
-      const state = saved?.state ? ` (${saved.state}${saved.reason ? `: ${saved.reason}` : ''})` : saved?.taskId ? ' (accepted)' : '';
-      throw new Error(`Operation ${operationId} has a record from an earlier version of this add-on${state} that does not show it belongs to this project; nothing was sent and nothing from that record was used. Check your ${via} account; for a new image use a new operationId.`);
+    const proven = saved && scope && entry.bound && saved.operationId === entry.operationId && (!entry.scoped || (saved.project ?? null) === scope);
+    if (!proven) {
+      throw new Error(`Operation ${operationId} has a record from an earlier version of this add-on${stateOf(saved)} that does not show it belongs to this project; nothing was sent and nothing from that record was used. Check your ${via} account; for a new image use a new operationId.`);
     }
-    if (!legacy.includes(saved.fingerprint)) {
+    const same = entry.scoped ? saved.fingerprint === fingerprint : legacy.includes(saved.fingerprint);
+    if (!same) {
+      if (saved.provider && saved.provider !== provider) throw sentElsewhere(saved, provider);
       throw new Error(`Operation ${operationId} was already used for a different image request; nothing was sent. Use a new operationId for a new image.`);
     }
     const moved = { ...saved, operationId, project: scope, fingerprint, movedFrom: path.basename(entry.file), movedAt: deps.now().toISOString() };
@@ -195,19 +243,19 @@ async function adoptLegacy(deps, { scope, operationId, fingerprint, legacy = [],
 
 /**
  * Reserve an operation before the paid call, for every route: the operation id is derived here (or the given one
- * used), and the earlier journals are checked here with the one lookup (earlierRecords). Returns { fresh: true }
+ * used), and the earlier records are checked here with the one lookup (earlierRecords). Returns { fresh: true }
  * when this call owns it, or { fresh: false } with the kept record when the operation already exists (in this
- * project, or moved here from the earlier journal).
+ * project, or moved here from an earlier record).
  */
-export async function reserveOperation(deps, { job, source, model, fingerprint, legacy, provider }) {
+export async function reserveOperation(deps, { job, model, fingerprint, legacy, provider }) {
   const { stateDir } = job;
-  const operationId = operationIdFor(job, source, model);
-  const earlier = earlierRecords(job, source, model);
+  const operationId = operationIdFor(job);
   const scope = job.projectDir || null;
-  const file = path.join(stateDir, `${sha(JSON.stringify(['op', scope, operationId])).slice(0, 32)}.json`);
+  const file = scopedFile(stateDir, scope, operationId);
+  const earlier = earlierRecords(job, deps.env, model).filter((e) => e.file !== file);
   const record = { operationId, project: scope, provider, fingerprint, state: 'submitting', reservedAt: deps.now().toISOString() };
   await deps.fs.mkdir(stateDir, { recursive: true });
-  if ((await readRecord(deps, file)) === undefined) await adoptLegacy(deps, { scope, operationId, fingerprint, legacy, earlier, provider, file });
+  if ((await readRecord(deps, file)) === undefined) await adoptEarlier(deps, { scope, operationId, fingerprint, legacy, earlier, provider, file });
   try {
     await deps.fs.writeFile(file, JSON.stringify(record, null, 2), { flag: 'wx' });
     return { fresh: true, file, record, operationId, provider };
@@ -222,6 +270,7 @@ export async function reserveOperation(deps, { job, source, model, fingerprint, 
     throw new Error(`Operation ${operationId} belongs to another project; nothing was sent and nothing from that project was used.`);
   }
   if (saved.fingerprint !== fingerprint) {
+    if (saved.provider && saved.provider !== provider) throw sentElsewhere(saved, provider);
     throw new Error(`Operation ${operationId} was already used for a different image request; nothing was sent. Use a new operationId for a new image.`);
   }
   return { fresh: false, file, record: saved, operationId, provider };
