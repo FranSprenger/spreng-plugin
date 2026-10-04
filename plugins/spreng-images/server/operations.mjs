@@ -27,9 +27,11 @@
 // provider gets that copy, so what is sent is always what was fingerprinted, even if the project file changes
 // while the request runs.
 //
-// Records from the earlier journal (one file per operation id, no project) are checked before a new record is
-// made, so upgrading never sends an operation again. Such a record moves to this project only when it shows it
-// belongs here (its outPath is inside this project); otherwise the operation is refused, nothing is sent and
+// Records from the earlier journals (one file per operation id, no project: operations/, and kie-operations/ for
+// the first KIE journal) are checked before a new record is made, under every id an earlier version derived for
+// the same request, so upgrading never sends an operation again. Such a record moves to this project only when its
+// file name was derived from this exact canonical project folder (an automatic id from the versions that put the
+// project in it); every other earlier record stays unresolved: the operation is refused, nothing is sent and
 // nothing from that record is used.
 
 import path from 'node:path';
@@ -117,35 +119,67 @@ async function readRecord(deps, file) {
   }
 }
 
-/** True when an earlier record shows it belongs to this project: its image was saved inside the project folder. */
-async function belongsTo(deps, record, scope) {
-  if (!scope || typeof record?.outPath !== 'string') return false;
-  const rel = path.relative(scope, await canonicalPath(deps.fs, record.outPath));
-  return Boolean(rel) && !rel.startsWith('..') && !path.isAbsolute(rel);
+const legacyFile = (dir, id) => path.join(dir, `${sha('op:' + id).slice(0, 32)}.json`);
+const autoId = (fields) => 'auto-' + sha(JSON.stringify(fields)).slice(0, 16);
+
+/**
+ * Where the earlier journals may hold this request: [{ file, operationId, bound }], each id as that version derived
+ * it (fields in its order). bound is true only for an automatic id that holds this canonical project folder, the
+ * one proof that the record was made in this project; a given id, or an automatic id from before the project was
+ * part of it, proves nothing about the project.
+ */
+export function earlierRecords(job, source, model) {
+  const kieDir = path.join(path.dirname(job.stateDir), 'kie-operations');
+  const dirs = source === 'kie' ? [job.stateDir, kieDir] : [job.stateDir];
+  if (job.operationId) {
+    const id = String(job.operationId);
+    return dirs.map((dir) => ({ file: legacyFile(dir, id), operationId: id, bound: false }));
+  }
+  const { prompt } = job;
+  const project = job.projectDir || null;
+  const aspectRatio = job.aspectRatio || null;
+  const size = job.size || null;
+  const outPath = job.requestedOutPath || null;
+  const resolved = job.references || [];
+  const typed = job.typedReferences || resolved;
+  const out = [];
+  const add = (dir, fields, bound) => {
+    const id = autoId(fields);
+    if (!out.some((e) => e.operationId === id && e.file === legacyFile(dir, id))) out.push({ file: legacyFile(dir, id), operationId: id, bound });
+  };
+  // 816c1ae (references as typed) and a15c7cd (resolved against the project): the canonical project is in the id.
+  if (project) for (const references of [resolved, typed]) add(job.stateDir, { source, model, project, prompt, references, aspectRatio, size, outPath }, true);
+  // f0e3ddf and 066b539: no project, references as typed.
+  add(job.stateDir, { source, model, prompt, references: typed, aspectRatio, size, outPath }, false);
+  // ac007f2: KIE only, no source and no project, kept in kie-operations/.
+  if (source === 'kie') add(kieDir, { model, prompt, references: typed, aspectRatio, outPath }, false);
+  return out;
 }
 
 /**
- * Check the earlier journal (one record per operation id, no project) before a new record is made. A record that
- * belongs to this project is moved to it (the earlier files are kept, so another project stays refused); any other
- * earlier record refuses the operation without sending anything or using anything from it.
+ * Check the earlier journals before a new record is made. A record whose id was derived from this project is moved
+ * to it (the earlier files are kept); any other earlier record refuses the operation without sending anything or
+ * using anything from it.
  */
-async function adoptLegacy(deps, stateDir, { scope, operationId, fingerprint, legacy = [], provider, file }) {
-  const legacyFile = path.join(stateDir, `${sha('op:' + operationId).slice(0, 32)}.json`);
-  const saved = await readRecord(deps, legacyFile);
-  if (saved === undefined) return;
-  const via = saved?.provider || provider;
-  if (!saved || !(await belongsTo(deps, saved, scope))) {
-    const state = saved?.state ? ` (${saved.state}${saved.reason ? `: ${saved.reason}` : ''})` : '';
-    throw new Error(`Operation ${operationId} has a record from an earlier version of this add-on${state} that does not show it belongs to this project; nothing was sent and nothing from that record was used. Check your ${via} account; for a new image use a new operationId.`);
-  }
-  if (!legacy.includes(saved.fingerprint)) {
-    throw new Error(`Operation ${operationId} was already used for a different image request; nothing was sent. Use a new operationId for a new image.`);
-  }
-  const moved = { ...saved, project: scope, fingerprint, movedFrom: path.basename(legacyFile), movedAt: deps.now().toISOString() };
-  try {
-    await deps.fs.writeFile(file, JSON.stringify(moved, null, 2), { flag: 'wx' });
-  } catch (e) {
-    if (e.code !== 'EEXIST') throw e; // another call moved it at the same moment
+async function adoptLegacy(deps, { scope, operationId, fingerprint, legacy = [], earlier = [], provider, file }) {
+  for (const entry of earlier) {
+    const saved = await readRecord(deps, entry.file);
+    if (saved === undefined) continue;
+    const via = saved?.provider || provider;
+    if (!saved || !scope || !entry.bound || saved.operationId !== entry.operationId) {
+      const state = saved?.state ? ` (${saved.state}${saved.reason ? `: ${saved.reason}` : ''})` : saved?.taskId ? ' (accepted)' : '';
+      throw new Error(`Operation ${operationId} has a record from an earlier version of this add-on${state} that does not show it belongs to this project; nothing was sent and nothing from that record was used. Check your ${via} account; for a new image use a new operationId.`);
+    }
+    if (!legacy.includes(saved.fingerprint)) {
+      throw new Error(`Operation ${operationId} was already used for a different image request; nothing was sent. Use a new operationId for a new image.`);
+    }
+    const moved = { ...saved, operationId, project: scope, fingerprint, movedFrom: path.basename(entry.file), movedAt: deps.now().toISOString() };
+    try {
+      await deps.fs.writeFile(file, JSON.stringify(moved, null, 2), { flag: 'wx' });
+    } catch (e) {
+      if (e.code !== 'EEXIST') throw e; // another call moved it at the same moment
+    }
+    return;
   }
 }
 
@@ -153,12 +187,12 @@ async function adoptLegacy(deps, stateDir, { scope, operationId, fingerprint, le
  * Reserve an operation before the paid call. Returns { fresh: true } when this call owns it, or { fresh: false }
  * with the kept record when the operation already exists (in this project, or moved here from the earlier journal).
  */
-export async function reserveOperation(deps, stateDir, { project, operationId, fingerprint, legacy, provider }) {
+export async function reserveOperation(deps, stateDir, { project, operationId, fingerprint, legacy, earlier, provider }) {
   const scope = project || null;
   const file = path.join(stateDir, `${sha(JSON.stringify(['op', scope, operationId])).slice(0, 32)}.json`);
   const record = { operationId, project: scope, provider, fingerprint, state: 'submitting', reservedAt: deps.now().toISOString() };
   await deps.fs.mkdir(stateDir, { recursive: true });
-  if ((await readRecord(deps, file)) === undefined) await adoptLegacy(deps, stateDir, { scope, operationId, fingerprint, legacy, provider, file });
+  if ((await readRecord(deps, file)) === undefined) await adoptLegacy(deps, { scope, operationId, fingerprint, legacy, earlier, provider, file });
   try {
     await deps.fs.writeFile(file, JSON.stringify(record, null, 2), { flag: 'wx' });
     return { fresh: true, file, record, operationId, provider };
