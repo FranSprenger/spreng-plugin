@@ -91,37 +91,53 @@ export async function runCodex(job, deps) {
     provider: 'Codex CLI',
   });
   if (!op.fresh) return replayOperation(deps, op);
-  let pick;
-  try {
-    pick = await codexImage(prompt, references, tmpDir, deps);
-  } catch (e) {
-    await releaseOperation(deps, op); // no image was taken, and the user's plan is not charged per image
-    throw e;
-  }
-  return completeOperation(deps, op, await deps.fs.readFile(pick), job.outPath, { source: 'codex', madeBy: 'Codex CLI image tool', codexFile: pick });
-}
-
-/** Run `codex exec` once and return the image file this run's own thread saved. */
-async function codexImage(prompt, references, tmpDir, deps) {
   const codexHome = deps.env.CODEX_HOME || path.join(deps.homedir(), '.codex');
   const imagesDir = path.join(codexHome, 'generated_images');
-  const before = new Set(await listImages(imagesDir, deps.fs));
-  const refs = await localRefs(references, tmpDir, deps);
-  const args = ['exec', '--skip-git-repo-check', '--sandbox', 'read-only', '--json', '-C', tmpDir];
-  for (const r of refs) args.push('-i', r);
-  args.push(codexTask(prompt));
-  await deps.fs.mkdir(tmpDir, { recursive: true });
-  const { code, stdout, stderr } = await deps.run(deps.env.SPRENG_IMAGES_CODEX_BIN || 'codex', args, { timeoutMs: 10 * 60 * 1000 });
-  if (code !== 0) throw new Error(`codex exec exited ${code}: ${String(stderr || '').trim().slice(-400) || 'no error text'}`);
+  let before;
+  let args;
+  try {
+    before = new Set(await listImages(imagesDir, deps.fs));
+    const refs = await localRefs(references, tmpDir, deps);
+    args = ['exec', '--skip-git-repo-check', '--sandbox', 'read-only', '--json', '-C', tmpDir];
+    for (const r of refs) args.push('-i', r);
+    args.push(codexTask(prompt));
+    await deps.fs.mkdir(tmpDir, { recursive: true });
+  } catch (e) {
+    await releaseOperation(deps, op); // codex was not started
+    throw e;
+  }
+  // From here codex may have made an image, even when it fails afterwards (a timeout, a lost answer, a nonzero
+  // exit after saving). Only a codex that could not be started at all frees the operation; anything else is kept
+  // as unclear and never run again for the same operation.
+  let thread = null;
+  const unclear = async (why) => {
+    const where = thread ? ` Any image it made is in ${path.join(imagesDir, thread)}.` : '';
+    await markUncertain(deps, op, why);
+    return new Error(`${why}. Codex was started for operation ${op.operationId}, so it was not run again.${where} For a new image use a new operationId.`);
+  };
+  let ran;
+  try {
+    ran = await deps.run(deps.env.SPRENG_IMAGES_CODEX_BIN || 'codex', args, { timeoutMs: 10 * 60 * 1000 });
+  } catch (e) {
+    throw await unclear(`codex exec ended without an answer: ${e.message}`);
+  }
+  const { code, stdout, stderr, started } = ran;
+  if (started === false) {
+    await releaseOperation(deps, op); // the program never started, so nothing was made
+    throw new Error(`codex could not be started: ${String(stderr || '').trim().slice(-400) || 'no error text'}`);
+  }
+  thread = (String(stdout).match(/"thread_id"\s*:\s*"([A-Za-z0-9_-]+)"/) || [])[1] || null;
+  if (code !== 0) throw await unclear(`codex exec exited ${code}: ${String(stderr || '').trim().slice(-400) || 'no error text'}`);
   // Only an image Codex filed under THIS run's thread (generated_images/<thread_id>/) is used. Other Codex
   // sessions on this computer save into the same generated_images folder, so any other new image may belong
   // to another session (another client) and is never taken.
-  const thread = (String(stdout).match(/"thread_id"\s*:\s*"([A-Za-z0-9_-]+)"/) || [])[1];
-  if (!thread) throw new Error('codex finished without a thread id in its output, so its image cannot be told apart from other Codex sessions; nothing was copied.');
+  if (!thread) throw await unclear('codex finished without a thread id in its output, so its image cannot be told apart from other Codex sessions; nothing was copied');
   const threadDir = path.join(imagesDir, thread);
   const pick = (await listImages(threadDir, deps.fs)).filter((f) => !before.has(f)).sort().at(-1);
-  if (!pick) throw new Error(`codex thread ${thread} finished but no new image appeared in ${threadDir}; images from other Codex sessions are never used (is the Codex CLI signed in with a ChatGPT plan that includes images?)`);
-  return pick;
+  if (!pick) throw await unclear(`codex thread ${thread} finished but no new image appeared in ${threadDir}; images from other Codex sessions are never used (is the Codex CLI signed in with a ChatGPT plan that includes images?)`);
+  let bytes;
+  try { bytes = await deps.fs.readFile(pick); } catch (e) { throw await unclear(`the image codex made at ${pick} could not be read: ${e.message}`); }
+  return completeOperation(deps, op, bytes, job.outPath, { source: 'codex', madeBy: 'Codex CLI image tool', codexFile: pick });
 }
 
 /** A clear refusal from a provider (nothing was charged): any 4xx except 408 (timeout). */

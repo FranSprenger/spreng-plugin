@@ -12,20 +12,25 @@
 //               file at outPath is checked by content (never by size) before it is reported
 //   failed      the provider finished the job without an image; the same operation again reports that
 //
-// Only these release the reservation, because nothing was bought: a clear refusal from a paid provider, a Codex run
-// that left no image (Codex uses the user's plan, not a per-image charge), and a lost status check while collecting
-// a KIE task by its id (collecting buys nothing). Another image needs a new operation id.
+// Only these release the reservation, because nothing was bought: a clear refusal from a paid provider, a failure
+// before the request was sent (such as a reference that could not be downloaded, or a codex program that could not
+// be started), and a lost status check while collecting a KIE task by its id (collecting buys nothing). Once codex
+// has started, any failure is kept as uncertain, since it may already have made the image. Another image needs a
+// new operation id.
 
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 
 const sha = (data) => createHash('sha256').update(data).digest('hex');
 
-/** The operation id of a request: the one given, else one derived from everything that defines the image. */
+/**
+ * The operation id of a request: the one given, else one derived from everything that defines the image,
+ * including the project it is saved in (the journal is shared by every project on this computer).
+ */
 export function operationIdFor(job, source, model) {
   if (job.operationId) return String(job.operationId);
   return 'auto-' + sha(JSON.stringify({
-    source, model, prompt: job.prompt, references: job.references || [], aspectRatio: job.aspectRatio || null,
+    source, model, project: job.projectDir || null, prompt: job.prompt, references: job.references || [], aspectRatio: job.aspectRatio || null,
     size: job.size || null, outPath: job.requestedOutPath || null,
   })).slice(0, 16);
 }

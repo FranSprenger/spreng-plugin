@@ -19,11 +19,13 @@ export function runProcess(cmd, args, { timeoutMs } = {}) {
     const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
+    let started = false;
+    child.on('spawn', () => { started = true; });
     const timer = timeoutMs ? setTimeout(() => child.kill('SIGTERM'), timeoutMs) : null;
     child.stdout.on('data', (d) => { stdout += d; });
     child.stderr.on('data', (d) => { stderr += d; });
-    child.on('error', (e) => { if (timer) clearTimeout(timer); resolve({ code: -1, stdout, stderr: String(e.message) }); });
-    child.on('close', (code) => { if (timer) clearTimeout(timer); resolve({ code, stdout, stderr }); });
+    child.on('error', (e) => { if (timer) clearTimeout(timer); resolve({ code: -1, started, stdout, stderr: String(e.message) }); });
+    child.on('close', (code) => { if (timer) clearTimeout(timer); resolve({ code, started: true, stdout, stderr }); });
   });
 }
 
@@ -44,6 +46,19 @@ function dataDir(env) {
 }
 function projectDir(env) {
   return secret(env.CLAUDE_PROJECT_DIR) || process.cwd();
+}
+
+/** A folder's real path, stable before and after it exists: the nearest existing parent is resolved, the rest kept. */
+async function canonicalDir(fs, dir) {
+  let head = path.resolve(dir);
+  const tail = [];
+  for (;;) {
+    try { return path.join(await fs.realpath(head), ...tail); } catch { /* not there yet */ }
+    const parent = path.dirname(head);
+    if (parent === head) return path.resolve(dir);
+    tail.unshift(path.basename(head));
+    head = parent;
+  }
 }
 
 async function onPath(cmd, env, deps) {
@@ -94,7 +109,7 @@ export const TOOLS = [
         aspectRatio: { type: 'string', description: 'For KIE, such as 1:1 or 9:16.' },
         size: { type: 'string', description: 'For OpenAI, such as 1024x1024 or auto.' },
         kieTaskId: { type: 'string', description: 'Collect a KIE task that was still running, instead of starting a new one.' },
-        operationId: { type: 'string', description: 'Names this image purchase; pass the Spreng claim id. One operationId buys at most one image on OpenAI or KIE: the same operationId again returns the image already made (or collects the KIE task already accepted, or reports an unclear or failed outcome) and never pays again. For another image, use a new operationId. Without one, the same request is treated as the same operation.' },
+        operationId: { type: 'string', description: 'Names this image purchase; pass the Spreng claim id. One operationId buys at most one image on OpenAI or KIE: the same operationId again returns the image already made (or collects the KIE task already accepted, or reports an unclear or failed outcome) and never pays again. For another image, use a new operationId. Without one, the same request in the same project is treated as the same operation.' },
       },
       required: ['prompt'],
       additionalProperties: false,
@@ -133,6 +148,9 @@ export async function callTool(name, args = {}, deps = defaultDeps()) {
     if (typeof args.prompt !== 'string' || !args.prompt.trim()) throw new Error('prompt is required.');
     const stamp = deps.now().toISOString().replace(/[:.]/g, '-');
     const unique = `${stamp}-${randomUUID().slice(0, 8)}`;
+    // The canonical project folder: it names the project in derived operation ids, so one project never receives
+    // another project's image from the shared journal.
+    const project = await canonicalDir(deps.fs, projectDir(env));
     const outPath = path.resolve(projectDir(env), args.outPath || path.join('spreng-images', `${unique}.png`));
     if (choice.source === 'other') return runOther({ otherName: choice.otherName, outPath });
     // Each request gets its own work folder (downloaded references, the Codex working folder), removed afterwards,
@@ -142,7 +160,7 @@ export async function callTool(name, args = {}, deps = defaultDeps()) {
     const tmpDir = await deps.fs.mkdtemp(path.join(workRoot, 'req-'));
     const job = {
       prompt: args.prompt, references: args.references || [], outPath, tmpDir, size: args.size, aspectRatio: args.aspectRatio,
-      kieTaskId: args.kieTaskId, operationId: args.operationId, requestedOutPath: args.outPath, stateDir: path.join(dataDir(env), 'operations'),
+      kieTaskId: args.kieTaskId, operationId: args.operationId, requestedOutPath: args.outPath, projectDir: project, stateDir: path.join(dataDir(env), 'operations'),
     };
     try {
       if (choice.source === 'codex') return await runCodex(job, deps);

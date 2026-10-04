@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { callTool } from '../plugins/spreng-images/server/server.mjs';
+import { callTool, runProcess } from '../plugins/spreng-images/server/server.mjs';
 
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489', 'hex');
 const OPENAI_KEY = 'sk-test-openai-0000000000000000';
@@ -78,16 +78,62 @@ test('codex: the same operationId after completion returns the kept image withou
   assert.equal(c.runs, 2, 'a new operationId is a new image');
 });
 
-test('codex: a run that left no image frees the operation, so the same operationId may run again', async () => {
+test('codex: an image saved before codex exits nonzero is never made twice for the same operationId', async () => {
   const { deps, env } = await sandbox('codex');
   let runs = 0;
-  deps.run = async () => { runs++; return { code: 1, stdout: '', stderr: 'not signed in' }; };
-  await assert.rejects(callTool('make_image', { prompt: 'p', operationId: 'claim-c4' }, deps), /exited 1.*not signed in/);
+  deps.run = async () => {
+    runs++;
+    // Codex made and saved the image, then the process failed (a timeout or a lost answer looks the same).
+    const made = path.join(env.CODEX_HOME, 'generated_images', `thread-${runs}`, 'exec.png');
+    await fs.mkdir(path.dirname(made), { recursive: true });
+    await fs.writeFile(made, PNG);
+    return { code: 1, stdout: `{"type":"thread.started","thread_id":"thread-${runs}"}\n`, stderr: 'stream disconnected' };
+  };
+  await assert.rejects(callTool('make_image', { prompt: 'p', operationId: 'claim-c4' }, deps), /exited 1.*stream disconnected.*not run again/s);
+  await assert.rejects(callTool('make_image', { prompt: 'p', operationId: 'claim-c4' }, deps), /claim-c4.*unclear/s);
+  assert.equal(runs, 1, 'the retry does not run codex again');
+});
+
+test('codex: a codex that never ran at all, or a thrown run, keep the right state', async () => {
+  const { deps, env } = await sandbox('codex', { SPRENG_IMAGES_CODEX_BIN: '/nonexistent/spreng-test-codex' });
+  // Proven before submission: the real process runner could not start the program, so the operation is free again.
+  deps.run = runProcess;
+  await assert.rejects(callTool('make_image', { prompt: 'p', operationId: 'claim-c5' }, deps), /could not be started.*ENOENT/s);
   const c = { runs: 0 };
   deps.run = codexRun(env, c);
-  const out = await callTool('make_image', { prompt: 'p', operationId: 'claim-c4' }, deps);
-  assert.equal(runs + c.runs, 2);
+  const out = await callTool('make_image', { prompt: 'p', operationId: 'claim-c5' }, deps);
+  assert.equal(c.runs, 1);
   assert.deepEqual(await fs.readFile(out.path), PNG);
+  // A run whose answer was lost after it started is unclear and never run again.
+  let runs = 0;
+  deps.run = async () => { runs++; throw new Error('lost'); };
+  await assert.rejects(callTool('make_image', { prompt: 'p', operationId: 'claim-c6' }, deps), /lost/);
+  await assert.rejects(callTool('make_image', { prompt: 'p', operationId: 'claim-c6' }, deps), /claim-c6.*unclear/s);
+  assert.equal(runs, 1);
+});
+
+test('the same request in two projects that share plugin data makes two images, one in each project', async () => {
+  const { deps, env, dir } = await sandbox('openai', { SPRENG_IMAGES_OPENAI_KEY: OPENAI_KEY });
+  let calls = 0;
+  deps.fetch = async () => { calls++; return res(200, { data: [{ b64_json: b64(`image-${calls}`) }] }); };
+  const projectA = path.join(dir, 'A');
+  const projectB = path.join(dir, 'B');
+  await fs.mkdir(projectA, { recursive: true });
+  await fs.mkdir(projectB, { recursive: true });
+  const a = await callTool('make_image', { prompt: 'same', outPath: 'ad.png' }, { ...deps, env: { ...env, CLAUDE_PROJECT_DIR: projectA } });
+  const b = await callTool('make_image', { prompt: 'same', outPath: 'ad.png' }, { ...deps, env: { ...env, CLAUDE_PROJECT_DIR: projectB } });
+  assert.equal(calls, 2, 'project B gets its own image');
+  assert.equal(b.replayed, undefined);
+  assert.equal(await fs.realpath(path.dirname(a.path)), await fs.realpath(projectA));
+  assert.equal(await fs.realpath(path.dirname(b.path)), await fs.realpath(projectB));
+  assert.equal(String(await fs.readFile(path.join(projectA, 'ad.png'))), 'image-1');
+  assert.equal(String(await fs.readFile(path.join(projectB, 'ad.png'))), 'image-2');
+  // The same project reached through a symlink is the same project: the request is replayed, not bought again.
+  const linkA = path.join(dir, 'link-to-A');
+  await fs.symlink(projectA, linkA);
+  const again = await callTool('make_image', { prompt: 'same', outPath: 'ad.png' }, { ...deps, env: { ...env, CLAUDE_PROJECT_DIR: linkA } });
+  assert.equal(calls, 2);
+  assert.equal(again.replayed, true);
 });
 
 test('kie: concurrent collections of one kieTaskId check KIE once', async () => {
