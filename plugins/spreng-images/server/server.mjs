@@ -9,6 +9,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { SOURCES, secret, runCodex, runOpenAI, runKie, runOther } from './routes.mjs';
 
@@ -131,16 +132,26 @@ export async function callTool(name, args = {}, deps = defaultDeps()) {
     if (!choice?.source) throw new Error('No image source chosen yet: ask the user once (codex, openai, kie or other) and call set_image_source.');
     if (typeof args.prompt !== 'string' || !args.prompt.trim()) throw new Error('prompt is required.');
     const stamp = deps.now().toISOString().replace(/[:.]/g, '-');
-    const outPath = path.resolve(projectDir(env), args.outPath || path.join('spreng-images', `${stamp}.png`));
-    const tmpDir = path.join(dataDir(env), 'work', stamp);
+    const unique = `${stamp}-${randomUUID().slice(0, 8)}`;
+    const outPath = path.resolve(projectDir(env), args.outPath || path.join('spreng-images', `${unique}.png`));
+    if (choice.source === 'other') return runOther({ otherName: choice.otherName, outPath });
+    // Each request gets its own work folder (downloaded references, the Codex working folder), removed afterwards,
+    // so two requests at the same moment never read each other's files.
+    const workRoot = path.join(dataDir(env), 'work');
+    await deps.fs.mkdir(workRoot, { recursive: true });
+    const tmpDir = await deps.fs.mkdtemp(path.join(workRoot, 'req-'));
     const job = {
       prompt: args.prompt, references: args.references || [], outPath, tmpDir, size: args.size, aspectRatio: args.aspectRatio,
       kieTaskId: args.kieTaskId, operationId: args.operationId, requestedOutPath: args.outPath, stateDir: path.join(dataDir(env), 'operations'),
     };
-    if (choice.source === 'codex') return runCodex(job, deps);
-    if (choice.source === 'openai') return runOpenAI(job, deps, { key: secret(env.SPRENG_IMAGES_OPENAI_KEY), model: secret(env.SPRENG_IMAGES_OPENAI_MODEL) || 'gpt-image-2' });
-    if (choice.source === 'kie') return runKie(job, deps, { key: secret(env.SPRENG_IMAGES_KIE_KEY), model: secret(env.SPRENG_IMAGES_KIE_MODEL) || 'nano-banana-pro' });
-    return runOther({ otherName: choice.otherName, outPath });
+    try {
+      if (choice.source === 'codex') return await runCodex(job, deps);
+      if (choice.source === 'openai') return await runOpenAI(job, deps, { key: secret(env.SPRENG_IMAGES_OPENAI_KEY), model: secret(env.SPRENG_IMAGES_OPENAI_MODEL) || 'gpt-image-2' });
+      if (choice.source === 'kie') return await runKie(job, deps, { key: secret(env.SPRENG_IMAGES_KIE_KEY), model: secret(env.SPRENG_IMAGES_KIE_MODEL) || 'nano-banana-pro' });
+      throw new Error(`The remembered image source "${choice.source}" is not one of ${SOURCES.join(', ')}; call set_image_source again.`);
+    } finally {
+      await deps.fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    }
   }
   throw new Error(`Unknown tool ${name}`);
 }

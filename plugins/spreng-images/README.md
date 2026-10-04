@@ -29,10 +29,12 @@ written into a file by this add-on, never sent to Spreng and never shown in a to
 
 Reference images given as links are downloaded first (from the links Spreng's claim returns). Files it
 writes: the image in your project (default `spreng-images/` in the project), your remembered choice in
-Claude Code's plugin data folder (`image-source.json`), downloaded references in a `work/` folder
-there, and for the openai and kie sources an `operations/` folder there with one record per image request
-(its state, the KIE task id) and a copy of each image made, so one request is never paid for twice.
+Claude Code's plugin data folder (`image-source.json`), downloaded references in a folder of their own
+for each request under `work/` there (removed when the request ends), and for the codex, openai and kie
+sources an `operations/` folder there with one record per image request (its state, the KIE task id, the
+image's SHA-256) and a copy of each image made, so one request never makes or pays for a second image. The
+file saved in your project is checked against that SHA-256 before it is reported.
 Images made with the openai or kie source are paid for on your own account with that provider.
 
 Files: `server/server.mjs` (the local MCP server, Node only, no packages), `server/routes.mjs` (the four
-sources), `server/operations.mjs` (the record of each paid image request), `skills/image-source/SKILL.md`.
+sources), `server/operations.mjs` (the record of each image request), `skills/image-source/SKILL.md`.

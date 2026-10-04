@@ -25,8 +25,8 @@ user picks once; the choice is remembered on this computer.
 4. Carry on with Spreng's own steps, the same for every source: `create_native_image_upload`, PUT the
    file to the `signedUrl` it returns, then `finalize_native_image` with the prompt you used.
 
-One `operationId` buys at most one image. `make_image` records the request on this computer before the
-paid call; the same `operationId` again returns the image already made, collects a KIE task already
+One `operationId` buys at most one image, with every source except other. `make_image` records the request
+on this computer before calling Codex, OpenAI or KIE; the same `operationId` again returns the image already made, collects a KIE task already
 accepted (as does `kieTaskId`), or repeats an unclear or failed outcome, and never pays again. When it
 reports an unclear outcome, tell the user and do not ask for that image again without their go-ahead; a
 new image needs a new `operationId`.

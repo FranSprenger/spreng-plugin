@@ -1,22 +1,25 @@
-// operations.mjs: the journal that makes one operation id buy at most one image on the paid routes (OpenAI, KIE).
+// operations.mjs: the one journal that makes one operation id buy at most one image, used by every route that calls
+// a provider (Codex, OpenAI, KIE, and collecting a KIE task by its id).
 //
-// Before a paid call, the operation is reserved by creating its record file exclusively (O_EXCL), so a second
+// Before the provider call, the operation is reserved by creating its record file exclusively (O_EXCL), so a second
 // call with the same id, at the same time or later, finds the record instead of paying again. The record then
 // moves through these states and is kept on this computer ($CLAUDE_PLUGIN_DATA/operations/):
 //
 //   submitting  reserved; the paid call is being sent (or the process stopped while it was)
 //   uncertain   the paid call may have been charged but no usable answer came back; never resent
 //   accepted    KIE accepted the task; the same operation again collects that task
-//   completed   the image is kept next to the record; the same operation again returns it
+//   completed   the image is kept next to the record with its sha256; the same operation again returns it, and the
+//               file at outPath is checked by content (never by size) before it is reported
 //   failed      the provider finished the job without an image; the same operation again reports that
 //
-// Only a clear refusal from the provider (nothing was charged) releases the reservation. Another image needs a
-// new operation id.
+// Only these release the reservation, because nothing was bought: a clear refusal from a paid provider, a Codex run
+// that left no image (Codex uses the user's plan, not a per-image charge), and a lost status check while collecting
+// a KIE task by its id (collecting buys nothing). Another image needs a new operation id.
 
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 
-const sha = (text) => createHash('sha256').update(text).digest('hex');
+const sha = (data) => createHash('sha256').update(data).digest('hex');
 
 /** The operation id of a request: the one given, else one derived from everything that defines the image. */
 export function operationIdFor(job, source, model) {
@@ -82,15 +85,23 @@ export async function markFailed(deps, op, reason) {
   try { await updateOperation(deps, op, { state: 'failed', reason, at: deps.now().toISOString() }); } catch { /* still reserved */ }
 }
 
-/** Copy the kept image to outPath unless an identical-size copy is already there. */
-async function deliver(deps, resultFile, outPath) {
-  const [kept, there] = await Promise.all([
-    deps.fs.stat(resultFile),
-    deps.fs.stat(outPath).catch(() => null),
-  ]);
-  if (there && there.size === kept.size) return;
+/**
+ * Save the kept image at outPath, checked by content: the kept file must match the hash in its record, a file
+ * already at outPath is left alone only when its content is the same, and the copy is read back and checked.
+ */
+async function deliver(deps, resultFile, outPath, expectedSha) {
+  const kept = await deps.fs.readFile(resultFile);
+  const keptSha = sha(kept);
+  if (expectedSha && keptSha !== expectedSha) {
+    throw new Error(`the image kept at ${resultFile} does not match its record (it was changed or damaged), so it was not used`);
+  }
+  const want = expectedSha || keptSha;
+  const there = await deps.fs.readFile(outPath).catch(() => null);
+  if (there && sha(there) === want) return;
   await deps.fs.mkdir(path.dirname(outPath), { recursive: true });
   await deps.fs.copyFile(resultFile, outPath);
+  const written = await deps.fs.readFile(outPath);
+  if (sha(written) !== want) throw new Error(`the file written at ${outPath} does not match the kept image`);
 }
 
 /**
@@ -101,13 +112,15 @@ export async function completeOperation(deps, op, bytes, outPath, result) {
   const resultFile = op.file.replace(/\.json$/, '.image');
   try {
     await writeAtomic(deps, resultFile, bytes);
-    await updateOperation(deps, op, { state: 'completed', outPath, resultFile, result, completedAt: deps.now().toISOString() });
+    await updateOperation(deps, op, {
+      state: 'completed', outPath, resultFile, resultSha256: sha(bytes), result, completedAt: deps.now().toISOString(),
+    });
   } catch (e) {
     await markUncertain(deps, op, `the image was made but could not be kept on this computer: ${e.message}`);
     throw new Error(`${op.provider} made the image for operation ${op.operationId} (it may be charged) but it could not be kept on this computer (${e.message}); it was not sent again. Free some disk space; for a new image use a new operationId.`);
   }
   try {
-    await deliver(deps, resultFile, outPath);
+    await deliver(deps, resultFile, outPath, op.record.resultSha256);
   } catch (e) {
     throw new Error(`The image for operation ${op.operationId} is made and kept on this computer, but saving it at ${outPath} failed (${e.message}). The same make_image request again saves it without buying another.`);
   }
@@ -119,7 +132,7 @@ export async function replayOperation(deps, op) {
   const r = op.record;
   if (r.state === 'completed') {
     try {
-      await deliver(deps, r.resultFile, r.outPath);
+      await deliver(deps, r.resultFile, r.outPath, r.resultSha256);
     } catch (e) {
       throw new Error(`The image for operation ${op.operationId} is kept on this computer, but saving it at ${r.outPath} failed (${e.message}). Nothing was bought again.`);
     }

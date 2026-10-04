@@ -81,8 +81,10 @@ test('codex route: references given as links are downloaded and attached with -i
   await callTool('set_image_source', { source: 'codex' }, deps);
   deps.fetch = async (url) => { assert.equal(url, 'https://kkwbfbsokgefebizzkpt.supabase.co/storage/v1/ref.png'); return res(200, null); };
   let args;
+  let attached;
   deps.run = async (_c, a) => {
     args = a;
+    attached = await fs.readFile(a[a.indexOf('-i') + 1]); // the work folder is removed after the request
     const made = path.join(env.CODEX_HOME, 'generated_images', 't', 'exec-1.png');
     await fs.mkdir(path.dirname(made), { recursive: true });
     await fs.writeFile(made, PNG);
@@ -91,7 +93,7 @@ test('codex route: references given as links are downloaded and attached with -i
   await callTool('make_image', { prompt: 'p', references: ['https://kkwbfbsokgefebizzkpt.supabase.co/storage/v1/ref.png'] }, deps);
   const ref = args[args.indexOf('-i') + 1];
   assert.match(ref, /reference-1\.png$/);
-  assert.deepEqual(await fs.readFile(ref), PNG);
+  assert.deepEqual(attached, PNG);
 });
 
 test('codex route: no new image is an error, not a silent success', async () => {

@@ -11,9 +11,9 @@
 //           GET /api/v1/jobs/recordInfo until success or fail, then the result file is downloaded to outPath
 //   other   a source the user named: no call; the answer says what to do with the file once it exists
 //
-// The two paid routes (openai, kie) run each request as one operation (operations.mjs): the operation is reserved
-// on this computer before the paid call, unclear and finished outcomes are kept, and the same operation again
-// returns what is kept (the image, the KIE task, or the unclear or failed outcome) instead of paying again. An
+// Every route that calls a provider (codex, openai, kie, and collecting a KIE task by id) runs each request as one
+// operation (operations.mjs): the operation is reserved on this computer before the provider call, unclear and
+// finished outcomes are kept, and the same operation again returns what is kept (the image, the KIE task, or the unclear or failed outcome) instead of paying again. An
 // unclear outcome (network error, timeout, 5xx, lost answer) is reported, never retried, so the user is never
 // charged twice for one image. Another image needs a new operation id.
 
@@ -83,7 +83,26 @@ export function codexTask(prompt) {
   ].join('\n');
 }
 
-export async function runCodex({ prompt, references = [], outPath, tmpDir }, deps) {
+export async function runCodex(job, deps) {
+  const { prompt, references = [], tmpDir, stateDir } = job;
+  const op = await reserveOperation(deps, stateDir, {
+    operationId: operationIdFor(job, 'codex', 'codex'),
+    fingerprint: fingerprintOf({ source: 'codex', prompt, references }),
+    provider: 'Codex CLI',
+  });
+  if (!op.fresh) return replayOperation(deps, op);
+  let pick;
+  try {
+    pick = await codexImage(prompt, references, tmpDir, deps);
+  } catch (e) {
+    await releaseOperation(deps, op); // no image was taken, and the user's plan is not charged per image
+    throw e;
+  }
+  return completeOperation(deps, op, await deps.fs.readFile(pick), job.outPath, { source: 'codex', madeBy: 'Codex CLI image tool', codexFile: pick });
+}
+
+/** Run `codex exec` once and return the image file this run's own thread saved. */
+async function codexImage(prompt, references, tmpDir, deps) {
   const codexHome = deps.env.CODEX_HOME || path.join(deps.homedir(), '.codex');
   const imagesDir = path.join(codexHome, 'generated_images');
   const before = new Set(await listImages(imagesDir, deps.fs));
@@ -102,9 +121,7 @@ export async function runCodex({ prompt, references = [], outPath, tmpDir }, dep
   const threadDir = path.join(imagesDir, thread);
   const pick = (await listImages(threadDir, deps.fs)).filter((f) => !before.has(f)).sort().at(-1);
   if (!pick) throw new Error(`codex thread ${thread} finished but no new image appeared in ${threadDir}; images from other Codex sessions are never used (is the Codex CLI signed in with a ChatGPT plan that includes images?)`);
-  await deps.fs.mkdir(path.dirname(outPath), { recursive: true });
-  await deps.fs.copyFile(pick, outPath);
-  return { path: outPath, source: 'codex', madeBy: 'Codex CLI image tool', codexFile: pick };
+  return pick;
 }
 
 /** A clear refusal from a provider (nothing was charged): any 4xx except 408 (timeout). */
@@ -182,12 +199,7 @@ export async function runKie(job, deps, { key, model, pollMs = 5000, maxPolls = 
   const urls = references.filter((r) => /^https:\/\//i.test(r));
   if (urls.length !== references.length) throw new Error('KIE takes reference images as https links only.');
   const auth = { authorization: `Bearer ${key}` };
-  if (kieTaskId) {
-    const { bytes } = await kiePoll(kieTaskId, auth, deps, { pollMs, maxPolls });
-    await deps.fs.mkdir(path.dirname(job.outPath), { recursive: true });
-    await deps.fs.writeFile(job.outPath, bytes);
-    return { path: job.outPath, source: 'kie', madeBy: `KIE ${model} on the user's key`, taskId: kieTaskId };
-  }
+  if (kieTaskId) return collectKie(job, deps, { auth, model, pollMs, maxPolls });
 
   const op = await reserveOperation(deps, stateDir, {
     operationId: operationIdFor(job, 'kie', model),
@@ -227,6 +239,26 @@ export async function runKie(job, deps, { key, model, pollMs = 5000, maxPolls = 
   }
   const out = await completeOperation(deps, op, got.bytes, outPath, { source: 'kie', madeBy: `KIE ${model} on the user's key`, taskId });
   return { ...out, resumed };
+}
+
+/** Collect a KIE task by its id (no create): one collection per task id, and the collected image is kept. */
+async function collectKie(job, deps, { auth, model, pollMs, maxPolls }) {
+  const { kieTaskId, stateDir } = job;
+  const op = await reserveOperation(deps, stateDir, {
+    operationId: `kie-task-${kieTaskId}`,
+    fingerprint: fingerprintOf({ source: 'kie', collect: String(kieTaskId) }),
+    provider: 'KIE',
+  });
+  if (!op.fresh) return replayOperation(deps, op);
+  let got;
+  try {
+    got = await kiePoll(kieTaskId, auth, deps, { pollMs, maxPolls });
+  } catch (e) {
+    if (e.kieFinished) await markFailed(deps, op, e.message);
+    else await releaseOperation(deps, op); // collecting buys nothing, so it may be tried again
+    throw e;
+  }
+  return completeOperation(deps, op, got.bytes, job.outPath, { source: 'kie', madeBy: `KIE ${model} on the user's key`, taskId: kieTaskId });
 }
 
 async function kieCreate(model, prompt, urls, aspectRatio, auth, deps, operationId) {
