@@ -271,3 +271,73 @@ test('a kept image that no longer matches its record is never delivered', async 
   await assert.rejects(callTool('make_image', { prompt: 'p', operationId: 'h-3', outPath: 'h3.png' }, deps), /does not match/);
   await assert.rejects(fs.access(first.path), 'nothing wrong was written');
 });
+
+// ---------- local reference paths belong to the project ----------
+
+/** Projects A and B each hold their own logo.png, and this process works from a third folder with another one. */
+async function twoProjects(dir) {
+  const projectA = path.join(dir, 'client-a');
+  const projectB = path.join(dir, 'client-b');
+  const elsewhere = path.join(dir, 'server-cwd');
+  for (const [d, who] of [[projectA, 'logo-A'], [projectB, 'logo-B'], [elsewhere, 'logo-SERVER']]) {
+    await fs.mkdir(path.join(d, 'brand'), { recursive: true });
+    await fs.writeFile(path.join(d, 'brand', 'logo.png'), who);
+  }
+  const before = process.cwd();
+  process.chdir(elsewhere);
+  return { projectA, projectB, restore: () => process.chdir(before) };
+}
+
+test('openai: a relative reference is read from its own project, never from the server working folder', async () => {
+  const { deps, env, dir } = await sandbox('openai', { SPRENG_IMAGES_OPENAI_KEY: OPENAI_KEY });
+  const { projectA, projectB, restore } = await twoProjects(dir);
+  try {
+    const sent = {};
+    deps.fetch = async (url, init) => {
+      assert.match(url, /\/v1\/images\/edits$/);
+      sent[init.body.get('prompt')] = Buffer.from(await init.body.get('image[]').arrayBuffer()).toString();
+      return res(200, { data: [{ b64_json: b64(`image ${init.body.get('prompt')}`) }] });
+    };
+    await callTool('make_image', { prompt: 'A', references: ['brand/logo.png'], operationId: 'rel-a' }, { ...deps, env: { ...env, CLAUDE_PROJECT_DIR: projectA } });
+    await callTool('make_image', { prompt: 'B', references: ['brand/logo.png'], operationId: 'rel-b' }, { ...deps, env: { ...env, CLAUDE_PROJECT_DIR: projectB } });
+    assert.deepEqual(sent, { A: 'logo-A', B: 'logo-B' });
+  } finally { restore(); }
+});
+
+test('codex: a relative reference is attached as the absolute project file', async () => {
+  const { deps, env, dir } = await sandbox('codex');
+  const { projectA, projectB, restore } = await twoProjects(dir);
+  try {
+    const attached = [];
+    let n = 0;
+    deps.run = async (_cmd, args) => {
+      const i = ++n;
+      const ref = args[args.indexOf('-i') + 1];
+      assert.ok(path.isAbsolute(ref), `codex gets an absolute path, not ${ref}`);
+      attached.push(String(await fs.readFile(ref)));
+      const made = path.join(env.CODEX_HOME, 'generated_images', `r${i}`, 'exec.png');
+      await fs.mkdir(path.dirname(made), { recursive: true });
+      await fs.writeFile(made, PNG);
+      return { code: 0, stdout: `{"type":"thread.started","thread_id":"r${i}"}\n`, stderr: '' };
+    };
+    await callTool('make_image', { prompt: 'A', references: ['brand/logo.png'], operationId: 'crel-a' }, { ...deps, env: { ...env, CLAUDE_PROJECT_DIR: projectA } });
+    await callTool('make_image', { prompt: 'B', references: ['brand/logo.png'], operationId: 'crel-b' }, { ...deps, env: { ...env, CLAUDE_PROJECT_DIR: projectB } });
+    assert.deepEqual(attached, ['logo-A', 'logo-B']);
+  } finally { restore(); }
+});
+
+test('one operationId with the same relative reference in another project is a different request, never a replay', async () => {
+  const { deps, env, dir } = await sandbox('openai', { SPRENG_IMAGES_OPENAI_KEY: OPENAI_KEY });
+  const { projectA, projectB, restore } = await twoProjects(dir);
+  try {
+    let posts = 0;
+    deps.fetch = async () => { posts++; return res(200, { data: [{ b64_json: b64('image for A') }] }); };
+    await callTool('make_image', { prompt: 'p', references: ['brand/logo.png'], operationId: 'shared-id', outPath: 'ad.png' }, { ...deps, env: { ...env, CLAUDE_PROJECT_DIR: projectA } });
+    await assert.rejects(
+      callTool('make_image', { prompt: 'p', references: ['brand/logo.png'], operationId: 'shared-id', outPath: 'ad.png' }, { ...deps, env: { ...env, CLAUDE_PROJECT_DIR: projectB } }),
+      /already used for a different image request/,
+    );
+    assert.equal(posts, 1);
+    await assert.rejects(fs.access(path.join(projectB, 'ad.png')), 'project B never receives project A\'s image');
+  } finally { restore(); }
+});

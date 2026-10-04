@@ -104,7 +104,7 @@ export const TOOLS = [
       type: 'object',
       properties: {
         prompt: { type: 'string', description: 'The prompt, exactly as Spreng\'s claim gave it (brief.renderPrompt) or as adapted and recorded.' },
-        references: { type: 'array', items: { type: 'string' }, description: 'Reference images: https links or local file paths.' },
+        references: { type: 'array', items: { type: 'string' }, description: 'Reference images: https links or local file paths. Relative paths are inside the project.' },
         outPath: { type: 'string', description: 'Where to save the image. Relative paths are inside the project. Default: spreng-images/<time>.png in the project.' },
         aspectRatio: { type: 'string', description: 'For KIE, such as 1:1 or 9:16.' },
         size: { type: 'string', description: 'For OpenAI, such as 1024x1024 or auto.' },
@@ -158,8 +158,12 @@ export async function callTool(name, args = {}, deps = defaultDeps()) {
     const workRoot = path.join(dataDir(env), 'work');
     await deps.fs.mkdir(workRoot, { recursive: true });
     const tmpDir = await deps.fs.mkdtemp(path.join(workRoot, 'req-'));
+    // A local reference is the project's file: a relative path is resolved against the project folder here, before
+    // the operation is fingerprinted and before any route reads it, never against this server's working folder or
+    // the Codex work folder. Links stay as they are.
+    const references = (args.references || []).map((r) => (/^https?:\/\//i.test(r) ? r : path.resolve(project, r)));
     const job = {
-      prompt: args.prompt, references: args.references || [], outPath, tmpDir, size: args.size, aspectRatio: args.aspectRatio,
+      prompt: args.prompt, references, outPath, tmpDir, size: args.size, aspectRatio: args.aspectRatio,
       kieTaskId: args.kieTaskId, operationId: args.operationId, requestedOutPath: args.outPath, projectDir: project, stateDir: path.join(dataDir(env), 'operations'),
     };
     try {
