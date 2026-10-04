@@ -83,7 +83,7 @@ export const TOOLS = [
   {
     name: 'make_image',
     title: 'Make one image with the chosen source',
-    description: 'Makes one image from the prompt as given with the image source the user chose, and saves the file on this computer. Uses the user\'s own Codex plan or their own OpenAI or KIE account, which may cost them on that account. Sent once; an unclear outcome is reported, not retried. Then upload the file to Spreng with create_native_image_upload as usual.',
+    description: 'Makes one image from the prompt as given with the image source the user chose, and saves the file on this computer. Uses the user\'s own Codex plan or their own OpenAI or KIE account, which may cost them on that account. One operationId buys at most one image: the same operationId again returns what is kept instead of paying again, and an unclear outcome is reported, not retried. Then upload the file to Spreng with create_native_image_upload as usual.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -93,7 +93,7 @@ export const TOOLS = [
         aspectRatio: { type: 'string', description: 'For KIE, such as 1:1 or 9:16.' },
         size: { type: 'string', description: 'For OpenAI, such as 1024x1024 or auto.' },
         kieTaskId: { type: 'string', description: 'Collect a KIE task that was still running, instead of starting a new one.' },
-        operationId: { type: 'string', description: 'For KIE: names this image request, such as the Spreng claim id. A KIE task that was accepted but not yet collected is resumed when the same request (or the same operationId) comes again, so no second task is paid for.' },
+        operationId: { type: 'string', description: 'Names this image purchase; pass the Spreng claim id. One operationId buys at most one image on OpenAI or KIE: the same operationId again returns the image already made (or collects the KIE task already accepted, or reports an unclear or failed outcome) and never pays again. For another image, use a new operationId. Without one, the same request is treated as the same operation.' },
       },
       required: ['prompt'],
       additionalProperties: false,
@@ -135,7 +135,7 @@ export async function callTool(name, args = {}, deps = defaultDeps()) {
     const tmpDir = path.join(dataDir(env), 'work', stamp);
     const job = {
       prompt: args.prompt, references: args.references || [], outPath, tmpDir, size: args.size, aspectRatio: args.aspectRatio,
-      kieTaskId: args.kieTaskId, operationId: args.operationId, requestedOutPath: args.outPath, stateDir: path.join(dataDir(env), 'kie-operations'),
+      kieTaskId: args.kieTaskId, operationId: args.operationId, requestedOutPath: args.outPath, stateDir: path.join(dataDir(env), 'operations'),
     };
     if (choice.source === 'codex') return runCodex(job, deps);
     if (choice.source === 'openai') return runOpenAI(job, deps, { key: secret(env.SPRENG_IMAGES_OPENAI_KEY), model: secret(env.SPRENG_IMAGES_OPENAI_MODEL) || 'gpt-image-2' });

@@ -23,14 +23,16 @@ written into a file by this add-on, never sent to Spreng and never shown in a to
 | Source | What runs or is sent | Destination |
 |---|---|---|
 | codex | Runs your own `codex` program (`codex exec`, read-only sandbox) with the prompt and reference images; copies the image that run's own Codex thread saved in `~/.codex/generated_images/<thread>/` into your project (an image from any other Codex session is never used) | OpenAI, through your Codex sign-in |
-| openai | One request per image with your key, the prompt and any reference images | `https://api.openai.com/v1/images/generations` or `/v1/images/edits` |
-| kie | One task per image with your key, the prompt and reference links, then status checks and the result download; the accepted task id is kept on this computer until it is collected, so asking again resumes it instead of paying twice | `https://api.kie.ai/api/v1/jobs/createTask` and `/api/v1/jobs/recordInfo`, then the result link KIE returns |
+| openai | One request per image with your key, the prompt and any reference images; the request is recorded on this computer before it is sent, so asking again for the same image returns the one already made instead of paying twice | `https://api.openai.com/v1/images/generations` or `/v1/images/edits` |
+| kie | One task per image with your key, the prompt and reference links, then status checks and the result download; the request is recorded on this computer before the task is created and the accepted task id is kept with it, so asking again for the same image collects that task or returns the image already made instead of paying twice | `https://api.kie.ai/api/v1/jobs/createTask` and `/api/v1/jobs/recordInfo`, then the result link KIE returns |
 | other | Nothing | none |
 
 Reference images given as links are downloaded first (from the links Spreng's claim returns). Files it
 writes: the image in your project (default `spreng-images/` in the project), your remembered choice in
-Claude Code's plugin data folder (`image-source.json`), and downloaded references in a `work/` folder
-there. Images made with the openai or kie source are paid for on your own account with that provider.
+Claude Code's plugin data folder (`image-source.json`), downloaded references in a `work/` folder
+there, and for the openai and kie sources an `operations/` folder there with one record per image request
+(its state, the KIE task id) and a copy of each image made, so one request is never paid for twice.
+Images made with the openai or kie source are paid for on your own account with that provider.
 
 Files: `server/server.mjs` (the local MCP server, Node only, no packages), `server/routes.mjs` (the four
-sources), `skills/image-source/SKILL.md`.
+sources), `server/operations.mjs` (the record of each paid image request), `skills/image-source/SKILL.md`.

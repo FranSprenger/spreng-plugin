@@ -243,7 +243,7 @@ test('kie route: a polling network error keeps the task id; the same call again 
   assert.match(first.result.content[0].text, /task_1/, 'the error keeps the task id');
   assert.match(first.result.content[0].text, /socket hang up/);
   assert.equal(creates, 1);
-  const kept = await fs.readdir(path.join(env.CLAUDE_PLUGIN_DATA, 'kie-operations'));
+  const kept = await fs.readdir(path.join(env.CLAUDE_PLUGIN_DATA, 'operations'));
   assert.equal(kept.length, 1, 'the task id is on disk');
   pollFails = false;
   const out = await callTool('make_image', args, deps);
@@ -252,9 +252,12 @@ test('kie route: a polling network error keeps the task id; the same call again 
   assert.equal(out.resumed, true);
   assert.deepEqual(polled, ['task_1'], 'the resumed call polls the first task');
   assert.deepEqual(await fs.readFile(out.path), PNG);
-  assert.deepEqual(await fs.readdir(path.join(env.CLAUDE_PLUGIN_DATA, 'kie-operations')), [], 'a finished operation is cleared');
-  await callTool('make_image', args, deps);
-  assert.equal(creates, 2, 'a new request after a finished one makes a new image');
+  const again = await callTool('make_image', args, deps);
+  assert.equal(creates, 1, 'the same request after it finished returns the kept image, never a second purchase');
+  assert.equal(again.replayed, true);
+  assert.equal(again.taskId, 'task_1');
+  await callTool('make_image', { ...args, operationId: 'claim-next' }, deps);
+  assert.equal(creates, 2, 'another image needs a new operationId');
 });
 
 test('kie route: an operationId names the operation; a different one starts its own task', async () => {

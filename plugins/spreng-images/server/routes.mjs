@@ -8,16 +8,20 @@
 //   openai  the user's own OpenAI key: POST https://api.openai.com/v1/images/generations (or /v1/images/edits
 //           with reference files), one image, b64_json written to outPath
 //   kie     the user's own KIE key: POST https://api.kie.ai/api/v1/jobs/createTask once, then
-//           GET /api/v1/jobs/recordInfo until success or fail, then the result file is downloaded to outPath.
-//           The accepted task id is saved on this computer (stateDir) under the request's operation id before
-//           the first status check, so the same request again collects that task instead of paying for another
+//           GET /api/v1/jobs/recordInfo until success or fail, then the result file is downloaded to outPath
 //   other   a source the user named: no call; the answer says what to do with the file once it exists
 //
-// A paid create is sent once. An unclear outcome (network error, timeout, 5xx) is reported, never retried, so the
-// user is never charged twice for one image.
+// The two paid routes (openai, kie) run each request as one operation (operations.mjs): the operation is reserved
+// on this computer before the paid call, unclear and finished outcomes are kept, and the same operation again
+// returns what is kept (the image, the KIE task, or the unclear or failed outcome) instead of paying again. An
+// unclear outcome (network error, timeout, 5xx, lost answer) is reported, never retried, so the user is never
+// charged twice for one image. Another image needs a new operation id.
 
 import path from 'node:path';
-import { createHash } from 'node:crypto';
+import {
+  operationIdFor, fingerprintOf, reserveOperation, updateOperation, releaseOperation, markUncertain, markFailed,
+  completeOperation, replayOperation,
+} from './operations.mjs';
 
 export const SOURCES = ['codex', 'openai', 'kie', 'other'];
 export const OPENAI_BASE = 'https://api.openai.com';
@@ -103,32 +107,61 @@ export async function runCodex({ prompt, references = [], outPath, tmpDir }, dep
   return { path: outPath, source: 'codex', madeBy: 'Codex CLI image tool', codexFile: pick };
 }
 
-export async function runOpenAI({ prompt, references = [], outPath, tmpDir, size }, deps, { key, model }) {
+/** A clear refusal from a provider (nothing was charged): any 4xx except 408 (timeout). */
+const refused = (status) => status >= 400 && status < 500 && status !== 408;
+
+export async function runOpenAI(job, deps, { key, model }) {
+  const { prompt, references = [], tmpDir, size, stateDir } = job;
   if (!key) throw new Error('No OpenAI key is set. Run /plugin configure spreng-images@spreng and enter it there (never in the chat).');
-  const refs = await localRefs(references, tmpDir, deps);
+  const op = await reserveOperation(deps, stateDir, {
+    operationId: operationIdFor(job, 'openai', model),
+    fingerprint: fingerprintOf({ source: 'openai', model, prompt, references, size: size || null }),
+    provider: 'OpenAI',
+  });
+  if (!op.fresh) return replayOperation(deps, op);
+
   const auth = { authorization: `Bearer ${key}` };
-  let r;
-  if (refs.length) {
-    const form = new FormData();
-    form.append('model', model);
-    form.append('prompt', prompt);
-    if (size) form.append('size', size);
-    for (const f of refs) form.append('image[]', new Blob([await deps.fs.readFile(f)], { type: mimeOf(f) }), path.basename(f));
-    r = await deps.fetch(`${OPENAI_BASE}/v1/images/edits`, { method: 'POST', headers: auth, body: form });
-  } else {
-    r = await deps.fetch(`${OPENAI_BASE}/v1/images/generations`, {
-      method: 'POST', headers: { ...auth, 'content-type': 'application/json' },
-      body: JSON.stringify({ model, prompt, n: 1, ...(size ? { size } : {}) }),
-    });
+  let request;
+  try {
+    const refs = await localRefs(references, tmpDir, deps);
+    if (refs.length) {
+      const form = new FormData();
+      form.append('model', model);
+      form.append('prompt', prompt);
+      if (size) form.append('size', size);
+      for (const f of refs) form.append('image[]', new Blob([await deps.fs.readFile(f)], { type: mimeOf(f) }), path.basename(f));
+      request = [`${OPENAI_BASE}/v1/images/edits`, { method: 'POST', headers: auth, body: form }];
+    } else {
+      request = [`${OPENAI_BASE}/v1/images/generations`, {
+        method: 'POST', headers: { ...auth, 'content-type': 'application/json' },
+        body: JSON.stringify({ model, prompt, n: 1, ...(size ? { size } : {}) }),
+      }];
+    }
+  } catch (e) {
+    await releaseOperation(deps, op); // nothing was sent
+    throw e;
   }
-  let body;
-  try { body = await r.json(); } catch { body = null; }
-  if (!r.ok) throw new Error(`OpenAI answered HTTP ${r.status}: ${body?.error?.message || 'no message'}`);
+
+  const unclear = async (why) => {
+    await markUncertain(deps, op, why);
+    return new Error(`OpenAI call for operation ${op.operationId} had an unclear outcome (${why}); it may have been charged and was not retried. Check your OpenAI account; for a new image use a new operationId.`);
+  };
+  let r;
+  try { r = await deps.fetch(...request); } catch (e) { throw await unclear(e.message); }
+  let body = null;
+  let lost = null;
+  try { body = await r.json(); } catch (e) { lost = e.message; }
+  if (!r.ok) {
+    const msg = body?.error?.message || 'no message';
+    if (refused(r.status)) {
+      await releaseOperation(deps, op);
+      throw new Error(`OpenAI answered HTTP ${r.status}: ${msg}`);
+    }
+    throw await unclear(`HTTP ${r.status}: ${msg}`);
+  }
   const b64 = body?.data?.[0]?.b64_json;
-  if (!b64) throw new Error('OpenAI answered without image data (data[0].b64_json).');
-  await deps.fs.mkdir(path.dirname(outPath), { recursive: true });
-  await deps.fs.writeFile(outPath, Buffer.from(b64, 'base64'));
-  return { path: outPath, source: 'openai', madeBy: `OpenAI ${model} on the user's key` };
+  if (!b64) throw await unclear(lost ? `the answer was lost: ${lost}` : 'the answer had no image data (data[0].b64_json)');
+  return completeOperation(deps, op, Buffer.from(b64, 'base64'), job.outPath, { source: 'openai', madeBy: `OpenAI ${model} on the user's key` });
 }
 
 /** KIE input for the two image models whose reference field is documented. */
@@ -143,52 +176,61 @@ export function kieInput(model, prompt, references, aspectRatio) {
   return input;
 }
 
-const sha = (text) => createHash('sha256').update(text).digest('hex');
-
-/** The operation id of a KIE request: the one given, else one derived from everything that defines the image. */
-export function kieOperationId({ operationId, model, prompt, references = [], aspectRatio, requestedOutPath }) {
-  if (operationId) return String(operationId);
-  return 'auto-' + sha(JSON.stringify({ model, prompt, references, aspectRatio: aspectRatio || null, outPath: requestedOutPath || null })).slice(0, 16);
-}
-
 export async function runKie(job, deps, { key, model, pollMs = 5000, maxPolls = 120 }) {
   const { prompt, references = [], aspectRatio, kieTaskId, stateDir } = job;
   if (!key) throw new Error('No KIE key is set. Run /plugin configure spreng-images@spreng and enter it there (never in the chat).');
   const urls = references.filter((r) => /^https:\/\//i.test(r));
   if (urls.length !== references.length) throw new Error('KIE takes reference images as https links only.');
   const auth = { authorization: `Bearer ${key}` };
-  if (kieTaskId) return kiePoll(kieTaskId, job.outPath, model, auth, deps, { pollMs, maxPolls });
+  if (kieTaskId) {
+    const { bytes } = await kiePoll(kieTaskId, auth, deps, { pollMs, maxPolls });
+    await deps.fs.mkdir(path.dirname(job.outPath), { recursive: true });
+    await deps.fs.writeFile(job.outPath, bytes);
+    return { path: job.outPath, source: 'kie', madeBy: `KIE ${model} on the user's key`, taskId: kieTaskId };
+  }
 
-  // The task id is kept on disk against the operation id from the moment KIE accepts the task until it is
-  // finished, so a lost status check never loses it and the same request again resumes it.
-  const operationId = kieOperationId({ ...job, model });
-  const record = path.join(stateDir, `${sha('op:' + operationId).slice(0, 32)}.json`);
-  let saved = null;
-  try { saved = JSON.parse(await deps.fs.readFile(record, 'utf8')); } catch { saved = null; }
-  const resumed = Boolean(saved?.taskId);
-  const taskId = resumed ? saved.taskId : await kieCreate(model, prompt, urls, aspectRatio, auth, deps);
-  const outPath = resumed && saved.outPath ? saved.outPath : job.outPath;
-  if (!resumed) {
+  const op = await reserveOperation(deps, stateDir, {
+    operationId: operationIdFor(job, 'kie', model),
+    fingerprint: fingerprintOf({ source: 'kie', model, prompt, references, aspectRatio: aspectRatio || null }),
+    provider: 'KIE',
+  });
+  let taskId;
+  let outPath = job.outPath;
+  let resumed = false;
+  if (!op.fresh) {
+    if (op.record.state !== 'accepted' || !op.record.taskId) return replayOperation(deps, op);
+    // KIE accepted this operation's task earlier and it was not collected: collect it, never create another.
+    taskId = op.record.taskId;
+    outPath = op.record.outPath || outPath;
+    resumed = true;
+  } else {
     try {
-      await deps.fs.mkdir(stateDir, { recursive: true });
-      await deps.fs.writeFile(record, JSON.stringify({ operationId, taskId, model, outPath, acceptedAt: deps.now().toISOString() }, null, 2));
+      taskId = await kieCreate(model, prompt, urls, aspectRatio, auth, deps, op.operationId);
+    } catch (e) {
+      if (e.kieRefused) await releaseOperation(deps, op);
+      else await markUncertain(deps, op, e.message);
+      throw e;
+    }
+    try {
+      await updateOperation(deps, op, { state: 'accepted', taskId, model, outPath, acceptedAt: deps.now().toISOString() });
     } catch (e) {
       throw new Error(`KIE accepted task ${taskId} but it could not be saved on this computer (${e.message}); call make_image with kieTaskId ${taskId} to collect it instead of asking again.`);
     }
   }
-  let out;
+  let got;
   try {
-    out = await kiePoll(taskId, outPath, model, auth, deps, { pollMs, maxPolls });
+    got = await kiePoll(taskId, auth, deps, { pollMs, maxPolls });
   } catch (e) {
-    if (e.kieFinished) await deps.fs.rm(record, { force: true });
-    else e.message += ` [KIE task ${taskId}, operation ${operationId}: the same make_image request again (or operationId ${operationId}) collects this task without creating another]`;
+    if (e.kieFinished) await markFailed(deps, op, e.message);
+    else e.message += ` [KIE task ${taskId}, operation ${op.operationId}: the same make_image request again (or operationId ${op.operationId}) collects this task without creating another]`;
     throw e;
   }
-  await deps.fs.rm(record, { force: true });
-  return { ...out, operationId, resumed };
+  const out = await completeOperation(deps, op, got.bytes, outPath, { source: 'kie', madeBy: `KIE ${model} on the user's key`, taskId });
+  return { ...out, resumed };
 }
 
-async function kieCreate(model, prompt, urls, aspectRatio, auth, deps) {
+async function kieCreate(model, prompt, urls, aspectRatio, auth, deps, operationId) {
+  const unclear = (why) => new Error(`KIE create for operation ${operationId} had an unclear outcome (${why}); it may have been accepted and charged, so it was not retried. Check your KIE dashboard; for a new image use a new operationId.`);
   let r;
   try {
     r = await deps.fetch(`${KIE_BASE}/api/v1/jobs/createTask`, {
@@ -196,15 +238,18 @@ async function kieCreate(model, prompt, urls, aspectRatio, auth, deps) {
       body: JSON.stringify({ model, input: kieInput(model, prompt, urls, aspectRatio) }),
     });
   } catch (e) {
-    throw new Error(`KIE create had an unclear outcome (${e.message}); not retried. Check your KIE dashboard before asking again.`);
+    throw unclear(e.message);
   }
   let body;
   try { body = await r.json(); } catch { body = null; }
   const taskId = body?.data?.taskId;
-  if (!r.ok || (body?.code !== undefined && body.code !== 200) || !taskId) {
-    throw new Error(`KIE did not accept the task: HTTP ${r.status}${body?.msg ? `, ${body.msg}` : ''}; not retried.`);
+  const code = typeof body?.code === 'number' ? body.code : undefined;
+  if (r.ok && (code === undefined || code === 200) && taskId) return taskId;
+  // A clear refusal (HTTP 4xx, or KIE's own 4xx code in a 200 answer, such as 402 for no credits) charged nothing.
+  if (refused(r.status) || (r.ok && code !== undefined && refused(code))) {
+    throw Object.assign(new Error(`KIE did not accept the task: HTTP ${r.status}${code !== undefined ? `, code ${code}` : ''}${body?.msg ? `, ${body.msg}` : ''}; nothing was charged.`), { kieRefused: true });
   }
-  return taskId;
+  throw unclear(`HTTP ${r.status}${code !== undefined ? `, code ${code}` : ''}${body?.msg ? `, ${body.msg}` : ''}${taskId ? '' : ', no task id'}`);
 }
 
 /** An error after which the task is over on KIE's side, so there is nothing left to resume. */
@@ -212,7 +257,8 @@ function finished(message) {
   return Object.assign(new Error(message), { kieFinished: true });
 }
 
-async function kiePoll(taskId, outPath, model, auth, deps, { pollMs, maxPolls }) {
+/** Poll a KIE task until it finishes; resolves with the downloaded result bytes. */
+async function kiePoll(taskId, auth, deps, { pollMs, maxPolls }) {
   for (let i = 0; i < maxPolls; i++) {
     await deps.sleep(pollMs);
     let p;
@@ -233,9 +279,7 @@ async function kiePoll(taskId, outPath, model, auth, deps, { pollMs, maxPolls })
     let f;
     try { f = await deps.fetch(url); } catch (e) { throw new Error(`KIE result for task ${taskId} could not be downloaded (${e.message}).`); }
     if (!f.ok) throw new Error(`KIE result for task ${taskId} could not be downloaded: HTTP ${f.status}`);
-    await deps.fs.mkdir(path.dirname(outPath), { recursive: true });
-    await deps.fs.writeFile(outPath, Buffer.from(await f.arrayBuffer()));
-    return { path: outPath, source: 'kie', madeBy: `KIE ${model} on the user's key`, taskId };
+    return { bytes: Buffer.from(await f.arrayBuffer()) };
   }
   throw new Error(`KIE task ${taskId} was still running after ${maxPolls} checks; call make_image with kieTaskId ${taskId} later instead of asking again.`);
 }
