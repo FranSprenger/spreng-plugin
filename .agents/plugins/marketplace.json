@@ -1,0 +1,32 @@
+{
+  "name": "spreng",
+  "interface": {
+    "displayName": "Spreng"
+  },
+  "plugins": [
+    {
+      "name": "spreng",
+      "source": {
+        "source": "local",
+        "path": "./plugins/spreng"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    },
+    {
+      "name": "spreng-research",
+      "source": {
+        "source": "local",
+        "path": "./plugins/spreng-research"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

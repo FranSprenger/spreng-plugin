@@ -1,0 +1,10 @@
+{
+  "name": "spreng-plugin-repo",
+  "private": true,
+  "type": "module",
+  "description": "Tests for the Spreng plugins in this repository. No dependencies.",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "validate": "claude plugin validate plugins/spreng --strict && claude plugin validate plugins/spreng-images --strict && claude plugin validate plugins/spreng-research --strict && claude plugin validate . --strict"
+  }
+}

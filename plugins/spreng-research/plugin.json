@@ -1,0 +1,27 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "spreng-research",
+  "version": "0.1.0",
+  "description": "Add-on for Spreng research: scripts that run on your computer and read public pages logged out (Meta Ad Library first batch with media saved straight away, Reddit public feeds, YouTube comments) and transcribe saved ad videos with your own local speech-to-text.",
+  "author": {
+    "name": "Fran Sprenger",
+    "url": "https://spreng.io"
+  },
+  "homepage": "https://spreng.io",
+  "license": "MIT",
+  "keywords": ["research", "spreng", "ad-library", "reddit", "youtube", "transcripts"],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Spreng Research Collectors",
+        "shortDescription": "Local research collectors",
+        "longDescription": "Scripts that run on your computer and read public pages logged out: the Meta Ad Library first batch with its images and videos saved straight away, Reddit public feeds and YouTube comments, plus local speech-to-text for saved ad videos. The results are files in your project for the Spreng research method.",
+        "developerName": "Fran Sprenger",
+        "category": "Productivity",
+        "capabilities": ["Read public pages", "Write local files"],
+        "composerIcon": "./assets/icon.png",
+        "logo": "./assets/icon.png"
+      }
+    }
+  }
+}

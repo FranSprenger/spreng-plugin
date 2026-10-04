@@ -1,0 +1,25 @@
+{
+  "name": "spreng",
+  "displayName": "Spreng",
+  "version": "0.1.0",
+  "description": "Connects your Spreng account: Spreng prepares research reads, angles and ad image plans from your saved offer, your own assistant writes the text and makes the images with its own tools, and Spreng saves the results to your account.",
+  "author": {
+    "name": "Fran Sprenger",
+    "url": "https://spreng.io"
+  },
+  "homepage": "https://spreng.io",
+  "repository": "https://github.com/FranSprenger/spreng-plugin",
+  "license": "MIT",
+  "keywords": ["ads", "advertising", "research", "angles", "marketing"],
+  "icon": "./assets/icon.png",
+  "documentationUrl": "https://spreng.io/docs/plugin",
+  "supportUrl": "https://spreng.io/support",
+  "privacyPolicyUrl": "https://spreng.io/privacy",
+  "termsOfServiceUrl": "https://spreng.io/terms",
+  "mcpServers": {
+    "spreng": {
+      "type": "http",
+      "url": "https://app.spreng.io/mcp"
+    }
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "name": "spreng-images",
+  "displayName": "Spreng Images",
+  "version": "0.1.0",
+  "description": "Claude Code add-on for Spreng: Claude Code has no image tool of its own, so this lets it make images through a source you choose once: your Codex CLI signed in with ChatGPT, your own OpenAI key, your own KIE key, or another source you name. Keys stay on your computer.",
+  "author": {
+    "name": "Fran Sprenger",
+    "url": "https://spreng.io"
+  },
+  "homepage": "https://spreng.io",
+  "license": "MIT",
+  "keywords": ["images", "spreng", "codex", "openai", "kie"],
+  "mcpServers": {
+    "spreng-images": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/server/server.mjs"],
+      "env": {
+        "SPRENG_IMAGES_OPENAI_KEY": "${user_config.openai_api_key}",
+        "SPRENG_IMAGES_OPENAI_MODEL": "${user_config.openai_image_model}",
+        "SPRENG_IMAGES_KIE_KEY": "${user_config.kie_api_key}",
+        "SPRENG_IMAGES_KIE_MODEL": "${user_config.kie_image_model}"
+      }
+    }
+  },
+  "userConfig": {
+    "openai_api_key": {
+      "type": "string",
+      "title": "Your OpenAI API key (optional)",
+      "description": "Only for the openai image source. Kept in your computer's secure storage and sent only to https://api.openai.com. Leave empty for another source.",
+      "sensitive": true
+    },
+    "openai_image_model": {
+      "type": "string",
+      "title": "OpenAI image model",
+      "description": "Model used with your OpenAI key.",
+      "default": "gpt-image-2"
+    },
+    "kie_api_key": {
+      "type": "string",
+      "title": "Your KIE API key (optional)",
+      "description": "Only for the kie image source. Kept in your computer's secure storage and sent only to https://api.kie.ai. Leave empty for another source.",
+      "sensitive": true
+    },
+    "kie_image_model": {
+      "type": "string",
+      "title": "KIE image model",
+      "description": "Model used with your KIE key.",
+      "default": "nano-banana-pro"
+    }
+  }
+}

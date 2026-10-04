@@ -1,0 +1,9 @@
+{
+  "source": "charm-scanner origin/main e6a264d39, supabase/functions/spreng-mcp (tools.ts, text-tools.ts, gallery-tools.ts; list_clients from mcp-server/tools/list-clients.ts), and the live spreng connector's tool list in the lane session on 2026-10-04",
+  "tools": [
+    "list_clients", "get_client", "get_workflow", "search_prompt_plates", "get_prompt_plate",
+    "prepare_prompt_plate_ads", "claim_native_image", "create_native_image_upload", "finalize_native_image",
+    "get_native_run", "get_saved_images", "prepare_native_text_run", "get_native_text_run",
+    "claim_native_text_unit", "submit_native_text_answer", "publish_native_text_run"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "name": "spreng-research",
+  "displayName": "Spreng Research Collectors",
+  "version": "0.1.0",
+  "description": "Add-on for Spreng research: small scripts that run on your computer and read public pages logged out (Meta Ad Library first batch with its images and videos saved straight away, Reddit public feeds, YouTube comments) and turn saved ad videos into text with your own local speech-to-text.",
+  "author": {
+    "name": "Fran Sprenger",
+    "url": "https://spreng.io"
+  },
+  "homepage": "https://spreng.io",
+  "license": "MIT",
+  "keywords": ["research", "spreng", "ad-library", "reddit", "youtube", "transcripts"]
+}

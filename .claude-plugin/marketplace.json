@@ -1,0 +1,25 @@
+{
+  "name": "spreng",
+  "description": "Spreng plugins: the Spreng connector, plus optional add-ons for Claude Code image sources and local research collectors.",
+  "owner": {
+    "name": "Fran Sprenger",
+    "url": "https://spreng.io"
+  },
+  "plugins": [
+    {
+      "name": "spreng",
+      "source": "./plugins/spreng",
+      "description": "Connects your Spreng account: Spreng prepares research reads, angles and ad image plans, your own assistant writes and makes the images, and Spreng saves the results."
+    },
+    {
+      "name": "spreng-images",
+      "source": "./plugins/spreng-images",
+      "description": "Claude Code add-on: lets Claude Code make images through a source you choose once (your Codex CLI, your own OpenAI key or your own KIE key). Keys stay on your computer."
+    },
+    {
+      "name": "spreng-research",
+      "source": "./plugins/spreng-research",
+      "description": "Add-on: local collectors for research (Meta Ad Library first batch with media saved straight away, Reddit public feeds, YouTube comments, local speech-to-text for ad videos)."
+    }
+  ]
+}
