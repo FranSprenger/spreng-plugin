@@ -28,8 +28,10 @@
 // while the request runs.
 //
 // Records from the earlier journals (one file per operation id, no project: operations/, and kie-operations/ for
-// the first KIE journal) are checked before a new record is made, under every id an earlier version derived for
-// the same request, so upgrading never sends an operation again. Such a record moves to this project only when its
+// the first KIE journal) are checked before a new record is made, by one lookup (earlierRecords) that reserveOperation
+// runs for every route: both folders, whichever provider wrote the record, under the given id or every id an
+// earlier version derived for the same request, so neither upgrading nor switching image source sends an operation
+// again. Such a record moves to this project only when its
 // file name was derived from this exact canonical project folder (an automatic id from the versions that put the
 // project in it); every other earlier record stays unresolved: the operation is refused, nothing is sent and
 // nothing from that record is used.
@@ -122,37 +124,45 @@ async function readRecord(deps, file) {
 const legacyFile = (dir, id) => path.join(dir, `${sha('op:' + id).slice(0, 32)}.json`);
 const autoId = (fields) => 'auto-' + sha(JSON.stringify(fields)).slice(0, 16);
 
+// Every folder any version kept operation records in, next to each other in the plugin data folder:
+// operations/ (f0e3ddf onward, every route) and kie-operations/ (ac007f2, the first KIE journal).
+const JOURNAL_DIRS = ['operations', 'kie-operations'];
+
 /**
- * Where the earlier journals may hold this request: [{ file, operationId, bound }], each id as that version derived
- * it (fields in its order). bound is true only for an automatic id that holds this canonical project folder, the
- * one proof that the record was made in this project; a given id, or an automatic id from before the project was
- * part of it, proves nothing about the project.
+ * THE lookup of earlier records, the only one: every file any earlier version of this add-on could have kept for
+ * this operation, in every journal folder, whichever provider wrote it, under the given operation id or under every
+ * id an earlier version derived for the same request. reserveOperation runs it for every route before anything is
+ * sent, so no route chooses where to look. Returns [{ file, operationId, bound }]; bound is true only for an
+ * automatic id that holds this canonical project folder, the one proof that the record was made in this project
+ * (a given id, or an automatic id from before the project was part of it, proves nothing about the project).
  */
 export function earlierRecords(job, source, model) {
-  const kieDir = path.join(path.dirname(job.stateDir), 'kie-operations');
-  const dirs = source === 'kie' ? [job.stateDir, kieDir] : [job.stateDir];
+  const root = path.dirname(job.stateDir);
+  const ids = [];
   if (job.operationId) {
-    const id = String(job.operationId);
-    return dirs.map((dir) => ({ file: legacyFile(dir, id), operationId: id, bound: false }));
+    ids.push({ id: String(job.operationId), bound: false });
+  } else {
+    const { prompt } = job;
+    const project = job.projectDir || null;
+    const aspectRatio = job.aspectRatio || null;
+    const size = job.size || null;
+    const outPath = job.requestedOutPath || null;
+    const resolved = job.references || [];
+    const typed = job.typedReferences || resolved;
+    // 816c1ae (references as typed) and a15c7cd (resolved against the project): the canonical project is in the id.
+    if (project) for (const references of [resolved, typed]) ids.push({ id: autoId({ source, model, project, prompt, references, aspectRatio, size, outPath }), bound: true });
+    // f0e3ddf and 066b539: no project, references as typed.
+    ids.push({ id: autoId({ source, model, prompt, references: typed, aspectRatio, size, outPath }), bound: false });
+    // ac007f2: no source and no project (its KIE route kept these in kie-operations/).
+    ids.push({ id: autoId({ model, prompt, references: typed, aspectRatio, outPath }), bound: false });
   }
-  const { prompt } = job;
-  const project = job.projectDir || null;
-  const aspectRatio = job.aspectRatio || null;
-  const size = job.size || null;
-  const outPath = job.requestedOutPath || null;
-  const resolved = job.references || [];
-  const typed = job.typedReferences || resolved;
   const out = [];
-  const add = (dir, fields, bound) => {
-    const id = autoId(fields);
-    if (!out.some((e) => e.operationId === id && e.file === legacyFile(dir, id))) out.push({ file: legacyFile(dir, id), operationId: id, bound });
-  };
-  // 816c1ae (references as typed) and a15c7cd (resolved against the project): the canonical project is in the id.
-  if (project) for (const references of [resolved, typed]) add(job.stateDir, { source, model, project, prompt, references, aspectRatio, size, outPath }, true);
-  // f0e3ddf and 066b539: no project, references as typed.
-  add(job.stateDir, { source, model, prompt, references: typed, aspectRatio, size, outPath }, false);
-  // ac007f2: KIE only, no source and no project, kept in kie-operations/.
-  if (source === 'kie') add(kieDir, { model, prompt, references: typed, aspectRatio, outPath }, false);
+  for (const dir of JOURNAL_DIRS.map((d) => path.join(root, d))) {
+    for (const { id, bound } of ids) {
+      const file = legacyFile(dir, id);
+      if (!out.some((e) => e.file === file)) out.push({ file, operationId: id, bound });
+    }
+  }
   return out;
 }
 
@@ -184,11 +194,16 @@ async function adoptLegacy(deps, { scope, operationId, fingerprint, legacy = [],
 }
 
 /**
- * Reserve an operation before the paid call. Returns { fresh: true } when this call owns it, or { fresh: false }
- * with the kept record when the operation already exists (in this project, or moved here from the earlier journal).
+ * Reserve an operation before the paid call, for every route: the operation id is derived here (or the given one
+ * used), and the earlier journals are checked here with the one lookup (earlierRecords). Returns { fresh: true }
+ * when this call owns it, or { fresh: false } with the kept record when the operation already exists (in this
+ * project, or moved here from the earlier journal).
  */
-export async function reserveOperation(deps, stateDir, { project, operationId, fingerprint, legacy, earlier, provider }) {
-  const scope = project || null;
+export async function reserveOperation(deps, { job, source, model, fingerprint, legacy, provider }) {
+  const { stateDir } = job;
+  const operationId = operationIdFor(job, source, model);
+  const earlier = earlierRecords(job, source, model);
+  const scope = job.projectDir || null;
   const file = path.join(stateDir, `${sha(JSON.stringify(['op', scope, operationId])).slice(0, 32)}.json`);
   const record = { operationId, project: scope, provider, fingerprint, state: 'submitting', reservedAt: deps.now().toISOString() };
   await deps.fs.mkdir(stateDir, { recursive: true });

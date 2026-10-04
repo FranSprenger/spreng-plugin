@@ -19,7 +19,7 @@
 
 import path from 'node:path';
 import {
-  operationIdFor, fingerprintOf, requestFingerprint, legacyFingerprints, earlierRecords, snapshotReferences, reserveOperation, updateOperation, releaseOperation, markUncertain, markFailed,
+  fingerprintOf, requestFingerprint, legacyFingerprints, snapshotReferences, reserveOperation, updateOperation, releaseOperation, markUncertain, markFailed,
   completeOperation, replayOperation,
 } from './operations.mjs';
 
@@ -87,14 +87,12 @@ export function codexTask(prompt) {
 }
 
 export async function runCodex(job, deps) {
-  const { prompt, tmpDir, stateDir } = job;
+  const { prompt, tmpDir } = job;
   const snap = await snapshotReferences(deps, job.references, tmpDir);
-  const op = await reserveOperation(deps, stateDir, {
-    project: job.projectDir,
-    operationId: operationIdFor(job, 'codex', 'codex'),
+  const op = await reserveOperation(deps, {
+    job, source: 'codex', model: 'codex',
     fingerprint: requestFingerprint(job, { source: 'codex' }, snap.hashes),
     legacy: legacyFingerprints(job, (references) => ({ source: 'codex', prompt, references })),
-    earlier: earlierRecords(job, 'codex', 'codex'),
     provider: 'Codex CLI',
   });
   if (!op.fresh) return replayOperation(deps, op);
@@ -151,15 +149,13 @@ export async function runCodex(job, deps) {
 const refused = (status) => status >= 400 && status < 500 && status !== 408;
 
 export async function runOpenAI(job, deps, { key, model }) {
-  const { prompt, tmpDir, size, stateDir } = job;
+  const { prompt, tmpDir, size } = job;
   if (!key) throw new Error('No OpenAI key is set. Run /plugin configure spreng-images@spreng and enter it there (never in the chat).');
   const snap = await snapshotReferences(deps, job.references, tmpDir);
-  const op = await reserveOperation(deps, stateDir, {
-    project: job.projectDir,
-    operationId: operationIdFor(job, 'openai', model),
+  const op = await reserveOperation(deps, {
+    job, source: 'openai', model,
     fingerprint: requestFingerprint(job, { source: 'openai', model, size: size || null }, snap.hashes),
     legacy: legacyFingerprints(job, (references) => ({ source: 'openai', model, prompt, references, size: size || null })),
-    earlier: earlierRecords(job, 'openai', model),
     provider: 'OpenAI',
   });
   if (!op.fresh) return replayOperation(deps, op);
@@ -221,20 +217,18 @@ export function kieInput(model, prompt, references, aspectRatio) {
 }
 
 export async function runKie(job, deps, { key, model, pollMs = 5000, maxPolls = 120 }) {
-  const { prompt, references = [], aspectRatio, kieTaskId, stateDir } = job;
+  const { prompt, references = [], aspectRatio, kieTaskId } = job;
   if (!key) throw new Error('No KIE key is set. Run /plugin configure spreng-images@spreng and enter it there (never in the chat).');
   const urls = references.filter((r) => /^https:\/\//i.test(r));
   if (urls.length !== references.length) throw new Error('KIE takes reference images as https links only.');
   const auth = { authorization: `Bearer ${key}` };
   if (kieTaskId) return collectKie(job, deps, { auth, model, pollMs, maxPolls });
 
-  const op = await reserveOperation(deps, stateDir, {
-    project: job.projectDir,
-    operationId: operationIdFor(job, 'kie', model),
+  const op = await reserveOperation(deps, {
+    job, source: 'kie', model,
     // KIE takes links only (checked above), so each reference is hashed as its link and nothing local is read.
     fingerprint: requestFingerprint(job, { source: 'kie', model, aspectRatio: aspectRatio || null }, (await snapshotReferences(deps, urls, job.tmpDir)).hashes),
     legacy: legacyFingerprints(job, (references) => ({ source: 'kie', model, prompt, references, aspectRatio: aspectRatio || null })),
-    earlier: earlierRecords(job, 'kie', model),
     provider: 'KIE',
   });
   let taskId;
@@ -274,13 +268,11 @@ export async function runKie(job, deps, { key, model, pollMs = 5000, maxPolls = 
 
 /** Collect a KIE task by its id (no create): one collection per task id, and the collected image is kept. */
 async function collectKie(job, deps, { auth, model, pollMs, maxPolls }) {
-  const { kieTaskId, stateDir } = job;
-  const op = await reserveOperation(deps, stateDir, {
-    project: job.projectDir,
-    operationId: `kie-task-${kieTaskId}`,
+  const { kieTaskId } = job;
+  const op = await reserveOperation(deps, {
+    job: { ...job, operationId: `kie-task-${kieTaskId}` }, source: 'kie', model,
     fingerprint: fingerprintOf({ source: 'kie', collect: String(kieTaskId), project: job.projectDir || null }),
     legacy: [fingerprintOf({ source: 'kie', collect: String(kieTaskId) })],
-    earlier: earlierRecords({ ...job, operationId: `kie-task-${kieTaskId}` }, 'kie-collect', model),
     provider: 'KIE',
   });
   if (!op.fresh) return replayOperation(deps, op);
