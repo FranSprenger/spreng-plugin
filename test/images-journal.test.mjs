@@ -264,7 +264,7 @@ test('a kept image that no longer matches its record is never delivered', async 
   const { deps, env } = await sandbox('openai', { SPRENG_IMAGES_OPENAI_KEY: OPENAI_KEY });
   deps.fetch = async () => res(200, { data: [{ b64_json: b64('NEW!') }] });
   const first = await callTool('make_image', { prompt: 'p', operationId: 'h-3', outPath: 'h3.png' }, deps);
-  const opsDir = path.join(env.CLAUDE_PLUGIN_DATA, 'operations');
+  const opsDir = path.join(env.CLAUDE_PLUGIN_DATA, 'operations-v1');
   const kept = (await fs.readdir(opsDir)).find((f) => f.endsWith('.image'));
   await fs.writeFile(path.join(opsDir, kept), 'BAD!');
   await fs.rm(first.path);

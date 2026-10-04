@@ -245,7 +245,7 @@ test('kie route: a polling network error keeps the task id; the same call again 
   assert.match(first.result.content[0].text, /task_1/, 'the error keeps the task id');
   assert.match(first.result.content[0].text, /socket hang up/);
   assert.equal(creates, 1);
-  const kept = await fs.readdir(path.join(env.CLAUDE_PLUGIN_DATA, 'operations'));
+  const kept = await fs.readdir(path.join(env.CLAUDE_PLUGIN_DATA, 'operations-v1'));
   assert.equal(kept.length, 1, 'the task id is on disk');
   pollFails = false;
   const out = await callTool('make_image', args, deps);

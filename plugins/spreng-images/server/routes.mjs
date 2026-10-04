@@ -19,7 +19,7 @@
 
 import path from 'node:path';
 import {
-  fingerprintOf, requestFingerprint, legacyFingerprints, snapshotReferences, reserveOperation, updateOperation, releaseOperation, markUncertain, markFailed,
+  fingerprintOf, requestFingerprint, snapshotReferences, reserveOperation, updateOperation, releaseOperation, markUncertain, markFailed,
   completeOperation, replayOperation,
 } from './operations.mjs';
 
@@ -92,7 +92,6 @@ export async function runCodex(job, deps) {
   const op = await reserveOperation(deps, {
     job, model: 'codex',
     fingerprint: requestFingerprint(job, { source: 'codex' }, snap.hashes),
-    legacy: legacyFingerprints(job, (references) => ({ source: 'codex', prompt, references })),
     provider: 'Codex CLI',
   });
   if (!op.fresh) return replayOperation(deps, op);
@@ -155,7 +154,6 @@ export async function runOpenAI(job, deps, { key, model }) {
   const op = await reserveOperation(deps, {
     job, model,
     fingerprint: requestFingerprint(job, { source: 'openai', model, size: size || null }, snap.hashes),
-    legacy: legacyFingerprints(job, (references) => ({ source: 'openai', model, prompt, references, size: size || null })),
     provider: 'OpenAI',
   });
   if (!op.fresh) return replayOperation(deps, op);
@@ -228,7 +226,6 @@ export async function runKie(job, deps, { key, model, pollMs = 5000, maxPolls = 
     job, model,
     // KIE takes links only (checked above), so each reference is hashed as its link and nothing local is read.
     fingerprint: requestFingerprint(job, { source: 'kie', model, aspectRatio: aspectRatio || null }, (await snapshotReferences(deps, urls, job.tmpDir)).hashes),
-    legacy: legacyFingerprints(job, (references) => ({ source: 'kie', model, prompt, references, aspectRatio: aspectRatio || null })),
     provider: 'KIE',
   });
   let taskId;
@@ -272,7 +269,6 @@ async function collectKie(job, deps, { auth, model, pollMs, maxPolls }) {
   const op = await reserveOperation(deps, {
     job: { ...job, operationId: `kie-task-${kieTaskId}` }, model,
     fingerprint: fingerprintOf({ source: 'kie', collect: String(kieTaskId), project: job.projectDir || null }),
-    legacy: [fingerprintOf({ source: 'kie', collect: String(kieTaskId) })],
     provider: 'KIE',
   });
   if (!op.fresh) return replayOperation(deps, op);

@@ -32,10 +32,13 @@ writes: the image in your project (default `spreng-images/` in the project), you
 Claude Code's plugin data folder (`image-source.json`), downloaded references and a copy of each local
 reference file (what is sent is that copy) in a folder of their own for each request under `work/` there
 (removed when the request ends), and for the codex, openai and kie
-sources an `operations/` folder there with one record per image request (its state, the KIE task id, the
-image's SHA-256) and a copy of each image made, so one request never makes or pays for a second image. The
+sources an `operations-v1/` folder there with one record per image request (its source, model, state, the KIE
+task id, the image's SHA-256) and a copy of each image made, so one request never makes or pays for a second image. The
 file saved in your project is checked against that SHA-256 before it is reported.
 Images made with the openai or kie source are paid for on your own account with that provider.
+
+For developers: only `operations-v1/` is read; record files that development builds left in other folders
+(such as `operations/` or `kie-operations/`) are not read.
 
 Files: `server/server.mjs` (the local MCP server, Node only, no packages), `server/routes.mjs` (the four
 sources), `server/operations.mjs` (the record of each image request), `skills/image-source/SKILL.md`.
