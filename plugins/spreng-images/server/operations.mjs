@@ -44,10 +44,11 @@
 // that record is used.
 //
 // Earlier versions derived automatic ids with the model in them but kept the model only once KIE accepted a task or
-// the image was made, so an OpenAI or KIE record they left submitting, uncertain or failed does not say which model
-// it was made with; when that model is no longer configured, its id cannot be derived again. Such a record (and any
-// record that cannot be read) may be this same request, so a request without an operationId is refused while one is
-// kept in its project or in no project: nothing is sent. This version keeps the model in every record.
+// the image was made. A record they left submitting, uncertain or failed is found under every model this lookup knows
+// (above). One made with a model no longer known matches no id this request derives, so it is left alone and blocks
+// nothing, as does a record elsewhere in the journal that cannot be read: only a record found under an id the request
+// derives (or its given id) refuses it, also when that record cannot be read. This version keeps the model in every
+// record.
 
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -243,17 +244,8 @@ export function recordedModel(record) {
   return undefined;
 }
 
-/**
- * A kept record the lookup cannot rule out for a request without an operationId: one that cannot be read, or an
- * automatic-id record in this project (or in none) that does not name its model. A record naming its model was
- * checked under its own derived id; one with a given id, or from another project, is another operation.
- */
-function unidentified({ record }, scope) {
-  if (!record || typeof record !== 'object' || typeof record.operationId !== 'string') return true;
-  if (!record.operationId.startsWith('auto-')) return false;
-  if (record.project !== undefined && record.project !== scope) return false;
-  return recordedModel(record) === undefined;
-}
+/** The provider that wrote a record: its provider field, else KIE for the first KIE journal (kie-operations/). */
+const writtenBy = (saved, file) => saved?.provider || (path.basename(path.dirname(file)) === 'kie-operations' ? 'KIE' : undefined);
 
 const stateOf = (saved) => (saved?.state ? ` (${saved.state}${saved.reason ? `: ${saved.reason}` : ''}${saved.taskId ? `, task ${saved.taskId}` : ''})` : saved?.taskId ? ` (accepted, task ${saved.taskId})` : '');
 
@@ -272,14 +264,15 @@ async function adoptEarlier(deps, { scope, operationId, model, fingerprint, lega
   for (const entry of earlier) {
     const saved = await readRecord(deps, entry.file);
     if (saved === undefined) continue;
-    const via = saved?.provider || provider;
+    const via = writtenBy(saved, entry.file) || provider;
     const proven = saved && scope && entry.bound && saved.operationId === entry.operationId && (!entry.scoped || (saved.project ?? null) === scope);
     if (!proven) {
       throw new Error(`Operation ${operationId} has a record from an earlier version of this add-on${stateOf(saved)} that does not show it belongs to this project; nothing was sent and nothing from that record was used. Check your ${via} account; for a new image use a new operationId.`);
     }
     const same = entry.scoped ? saved.fingerprint === fingerprint : legacy.includes(saved.fingerprint);
     if (!same) {
-      if (saved.provider && saved.provider !== provider) throw sentElsewhere(saved, provider);
+      const by = writtenBy(saved, entry.file);
+      if (by && by !== provider) throw sentElsewhere({ ...saved, provider: by }, provider);
       throw new Error(`Operation ${operationId} was already used for a different image request; nothing was sent. Use a new operationId for a new image.`);
     }
     // The same request on the same route: made with this route's model, which the moved record keeps.
@@ -292,18 +285,6 @@ async function adoptEarlier(deps, { scope, operationId, model, fingerprint, lega
     return true;
   }
   return false;
-}
-
-/** Refuse a request without an operationId while a kept record that may be the same request cannot be identified. */
-function refuseUnidentified(journal, { scope, operationId, checked }) {
-  const left = journal.find((e) => !checked.has(e.file) && unidentified(e, scope));
-  if (!left) return;
-  const r = left.record;
-  const what = r && typeof r === 'object'
-    ? `was kept by an earlier version of this add-on${stateOf(r)}${r.reservedAt ? ` on ${r.reservedAt}` : ''} without the model it was made with`
-    : 'could not be read (another call may be writing it at this moment)';
-  const via = (r && r.provider) || 'image source';
-  throw new Error(`Operation ${operationId} was not sent: the record ${left.file} ${what}, so it may be this same request. Check your ${via} account. To make this image, pass an operationId (a new operation), or remove that record once you have checked it is not this image.`);
 }
 
 /**
@@ -323,8 +304,7 @@ export async function reserveOperation(deps, { job, model, fingerprint, legacy, 
   const record = { operationId, project: scope, provider, model, fingerprint, state: 'submitting', reservedAt: deps.now().toISOString() };
   await deps.fs.mkdir(stateDir, { recursive: true });
   if ((await readRecord(deps, file)) === undefined) {
-    const adopted = await adoptEarlier(deps, { scope, operationId, model, fingerprint, legacy, earlier, provider, file });
-    if (!adopted && !job.operationId) refuseUnidentified(journal, { scope, operationId, checked: new Set([file, ...earlier.map((e) => e.file)]) });
+    await adoptEarlier(deps, { scope, operationId, model, fingerprint, legacy, earlier, provider, file });
   }
   try {
     await deps.fs.writeFile(file, JSON.stringify(record, null, 2), { flag: 'wx' });

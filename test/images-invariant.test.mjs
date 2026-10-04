@@ -209,7 +209,7 @@ async function retry(s, routeB, args) {
  * OpenAI and KIE models the record was made with (set as the model settings while this version writes); retryEnv
  * then changes the settings before the retry (the user removed or replaced them in between).
  */
-async function matrix(models = MODEL, retryEnv = () => {}) {
+async function matrix(models = MODEL, retryEnv = () => {}, withoutId = () => true) {
   const failures = [];
   let pairs = 0;
   for (const w of writers(models)) {
@@ -227,6 +227,7 @@ async function matrix(models = MODEL, retryEnv = () => {}) {
     // image source in between): the id is derived again, under every form any version derived it, for every route.
     // References: none, a link (every route takes links) and a local file as typed (codex and OpenAI only; KIE takes
     // links only).
+    if (!withoutId(w)) continue;
     const refVariants = [[], ['https://cdn.example/logo.png'], ...(w.route === 'kie' ? [] : [['logo.png']])];
     for (const references of refVariants) {
       for (const routeB of ROUTES) {
@@ -239,8 +240,6 @@ async function matrix(models = MODEL, retryEnv = () => {}) {
         const { submissions, outcome } = await retry(s, routeB, args);
         pairs++;
         if (submissions !== 0) failures.push(`${w.name} -> retry on ${routeB} without operationId, references ${JSON.stringify(references)}: ${submissions} new submission(s) (${outcome})`);
-        // A record that names its model is found under its own id, not only refused for want of one.
-        else if (w.namesModel && / was not sent: the record /.test(outcome)) failures.push(`${w.name} -> retry on ${routeB} without operationId, references ${JSON.stringify(references)}: not found by its model (${outcome})`);
       }
     }
   }
@@ -256,14 +255,18 @@ test('invariant: a recorded operation is never submitted again, for every (versi
 // The same matrix for records made with configured (non-default) OpenAI and KIE models, retried after the user removed
 // those model settings, or replaced them with other models: the record's model is no longer configured anywhere.
 // (The KIE models take reference links, so a retry on KIE reaches createTask when the lookup misses.)
+// Every record that names its model is found under it. A record an earlier version kept without its model, made with a
+// model no longer known, matches no id the request derives and is left alone (it blocks nothing; see the lookup tests
+// below), so its pairs without an operationId are not in these two matrices; with the default models (the matrix
+// above) it is found and refused. A given operationId needs no model: every writer's explicit-id pairs run here too.
 const CUSTOM = { codex: 'codex', openai: 'gpt-image-1.5', kie: 'nano-banana-2' };
 for (const [change, retryEnv] of [
   ['removed', (env) => { delete env.SPRENG_IMAGES_OPENAI_MODEL; delete env.SPRENG_IMAGES_KIE_MODEL; }],
   ['replaced', (env) => { env.SPRENG_IMAGES_OPENAI_MODEL = 'gpt-image-1'; env.SPRENG_IMAGES_KIE_MODEL = 'gpt-image-2'; }],
 ]) {
   test(`invariant: a recorded operation made with configured models is never submitted again after those model settings are ${change}`, async () => {
-    const { failures, pairs } = await matrix(CUSTOM, retryEnv);
-    assert.ok(pairs > 400, `the matrix ran (${pairs} pairs)`);
+    const { failures, pairs } = await matrix(CUSTOM, retryEnv, (w) => w.namesModel);
+    assert.ok(pairs > 250, `the matrix ran (${pairs} pairs)`);
     assert.deepEqual(failures, [], `${failures.length} of ${pairs} pairs bought the same operation again:\n${failures.join('\n')}`);
   });
 }
@@ -277,26 +280,73 @@ test('invariant: an accepted ac007f2 KIE task made with seedream-v4 is not bough
   const { submissions, outcome } = await retry(s, 'openai', args);
   assert.equal(submissions, 0, outcome);
   assert.match(outcome, /^refused: /);
-  assert.doesNotMatch(outcome, / was not sent: the record /, 'found under the model its record names');
+  assert.match(outcome, /has a record from an earlier version/, 'found under the id derived with the model its record names');
 });
 
-test('lookup: a kept record that does not name its model, or cannot be read, refuses a request without an operationId; a given operationId is its own operation', async () => {
-  for (const kind of ['model unknown', 'unreadable']) {
-    const s = await sandbox();
-    // Another request (or this one, made with a model no longer configured): the id cannot be derived again.
-    const file = path.join(s.env.CLAUDE_PLUGIN_DATA, 'operations', 'b'.repeat(32) + '.json');
-    await fs.mkdir(path.dirname(file), { recursive: true });
-    await fs.writeFile(file, kind === 'unreadable' ? '{"operationId":"auto-' : JSON.stringify({
-      operationId: 'auto-0123456789abcdef', provider: 'OpenAI', fingerprint: 'f', state: 'uncertain', reason: 'HTTP 502', reservedAt: '2026-10-03T10:00:00.000Z',
-    }));
+test('lookup: an earlier record that matches no id this request derives (its model unknown, or unreadable) is left alone: another request in the project is made', async () => {
+  // Earlier versions (f0e3ddf to c4b1a73) kept no model in an OpenAI or KIE record left submitting, uncertain or failed.
+  // Such a record of another request, in this project or in none, and a record that cannot be read, block nothing.
+  const records = {
+    'model unknown, no project': JSON.stringify({ operationId: 'auto-0123456789abcdef', provider: 'OpenAI', fingerprint: 'f', state: 'uncertain', reason: 'HTTP 502', reservedAt: '2026-10-03T10:00:00.000Z' }),
+    'model unknown, KIE submitting': JSON.stringify({ operationId: 'auto-fedcba9876543210', provider: 'KIE', fingerprint: 'f', state: 'submitting', reservedAt: '2026-10-03T10:00:00.000Z' }),
+    unreadable: '{"operationId":"auto-',
+  };
+  for (const [kind, body] of Object.entries(records)) {
     for (const route of ROUTES) {
-      const { submissions, outcome } = await retry(s, route, { prompt: 'p', outPath: 'ad.png' });
-      assert.equal(submissions, 0, `${kind} on ${route}: ${outcome}`);
-      assert.match(outcome, /^refused: Operation auto-[0-9a-f]+ was not sent: the record /);
+      const s = await sandbox();
+      const file = path.join(s.env.CLAUDE_PLUGIN_DATA, 'operations', 'b'.repeat(32) + '.json');
+      await fs.mkdir(path.dirname(file), { recursive: true });
+      await fs.writeFile(file, kind === 'model unknown, KIE submitting' ? JSON.stringify({ ...JSON.parse(body), project: s.project }) : body);
+      const r = await retry(s, route, { prompt: 'p', outPath: 'ad.png' });
+      assert.deepEqual(r, { submissions: 1, outcome: 'returned' }, `${kind} on ${route}`);
+      assert.equal(await fs.readFile(file, 'utf8'), kind === 'model unknown, KIE submitting' ? JSON.stringify({ ...JSON.parse(body), project: s.project }) : body, 'the earlier record is kept as it was');
     }
-    await assert.rejects(callTool('make_image', { prompt: 'p', outPath: 'ad.png' }, s.deps), (e) => e.message.includes(file), 'the refusal names the record');
-    const given = await retry(s, 'openai', { prompt: 'p', outPath: 'ad.png', operationId: 'claim-new' });
-    assert.deepEqual(given, { submissions: 1, outcome: 'returned' }, kind);
+  }
+});
+
+test('lookup: an earlier record without its model still refuses the same request when an id it derives matches (the default model)', async () => {
+  for (const route of ['openai', 'kie']) {
+    for (const routeB of ROUTES) {
+      const s = await sandbox();
+      const args = { prompt: 'p', outPath: 'ad.png' };
+      const id = autoId({ source: route, model: MODEL[route], project: s.project, prompt: 'p', references: [], aspectRatio: null, size: null, outPath: 'ad.png' });
+      await seed(s.env, 'operations', id, legacyRecord(route, 'uncertain', s.A, legacyFingerprint(route, 'p', [])));
+      // An unrelated earlier record without its model is in the journal too.
+      await seed(s.env, 'operations', 'auto-0123456789abcdef', { provider: 'OpenAI', fingerprint: 'f', state: 'submitting', reservedAt: '2026-10-03T10:00:00.000Z' });
+      const r = await retry(s, routeB, args);
+      assert.equal(r.submissions, 0, `${route} record, retry on ${routeB}: ${r.outcome}`);
+      assert.match(r.outcome, /^refused: /);
+    }
+  }
+});
+
+test('lookup: a record that cannot be read under an id the request derives refuses it', async () => {
+  for (const routeB of ROUTES) {
+    const s = await sandbox();
+    const id = autoId({ source: 'openai', model: MODEL.openai, project: s.project, prompt: 'p', references: [], aspectRatio: null, size: null, outPath: 'ad.png' });
+    const file = path.join(s.env.CLAUDE_PLUGIN_DATA, 'operations', `${sha('op:' + id).slice(0, 32)}.json`);
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(file, '{"operationId":"auto-');
+    const r = await retry(s, routeB, { prompt: 'p', outPath: 'ad.png' });
+    assert.equal(r.submissions, 0, `retry on ${routeB}: ${r.outcome}`);
+    assert.match(r.outcome, /^refused: /);
+  }
+});
+
+test('lookup: a first-journal KIE record (kie-operations/, no provider field) is named as KIE when the request is retried on another source', async () => {
+  for (const operationId of ['op-1', undefined]) {
+    for (const routeB of ['openai', 'codex']) {
+      const s = await sandbox();
+      const args = { prompt: 'p', outPath: 'ad.png', ...(operationId ? { operationId } : {}) };
+      const id = operationId || autoId({ model: MODEL.kie, prompt: 'p', references: [], aspectRatio: null, outPath: 'ad.png' });
+      await seed(s.env, 'kie-operations', id, { taskId: 'task-old', model: MODEL.kie, outPath: path.join(s.A, 'ad.png'), acceptedAt: '2026-10-03T10:00:00.000Z' });
+      await callTool('set_image_source', { source: routeB }, s.deps);
+      countingProviders(s.env, s.deps);
+      const err = await callTool('make_image', args, s.deps).then(() => null, (e) => e);
+      assert.ok(err, `${operationId || 'automatic id'} on ${routeB}: refused`);
+      assert.match(err.message, /Check your KIE account/, `${operationId || 'automatic id'} on ${routeB}: ${err.message}`);
+      assert.doesNotMatch(err.message, /Check your (OpenAI|Codex CLI) account/);
+    }
   }
 });
 
