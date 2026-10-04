@@ -36,19 +36,22 @@
 // reserveOperation runs for every route: every folder (operations/, and kie-operations/ for the first KIE journal),
 // both file namings (one file per id; one per project and id from d107deb on), the given id or every id any version
 // derived for the same request under every source and model, whichever provider wrote it. The models are the
-// defaults, the models configured now, and every model a kept record names (its model field, or the madeBy of a
-// completed one), so a model setting removed or replaced since still finds its records. Such a record moves to this
+// defaults, the models configured now, every model a kept record names (its model field, or the madeBy of a
+// completed one) and every model recovered for a record that names none (below), so a model setting removed or
+// replaced since still finds its records. Such a record moves to this
 // project only when it is proven to be this project's (its id holds this exact canonical project folder) and is the
 // same request on the same route; a record of the same request on another route refuses the operation, naming that
 // provider; every other earlier record stays unresolved: the operation is refused, nothing is sent and nothing from
 // that record is used.
 //
 // Earlier versions derived automatic ids with the model in them but kept the model only once KIE accepted a task or
-// the image was made. A record they left submitting, uncertain or failed is found under every model this lookup knows
-// (above). One made with a model no longer known matches no id this request derives, so it is left alone and blocks
-// nothing, as does a record elsewhere in the journal that cannot be read: only a record found under an id the request
-// derives (or its given id) refuses it, also when that record cannot be read. This version keeps the model in every
-// record.
+// the image was made. For a record they left submitting, uncertain or failed, the model is recovered (recoveredModels):
+// every image model name OpenAI and KIE have offered (KNOWN_MODELS) and every word in the record are tried, and the
+// one with which this request derives the id the record holds is its model, so the record is found under that id
+// (above) even after its model setting was removed or replaced. A record whose id no candidate derives is another
+// request's (or made with a name this lookup cannot recover): it is left alone and blocks nothing, as does a record
+// elsewhere in the journal that cannot be read. Only a record found under an id the request derives (or its given id)
+// refuses it, also when that record cannot be read. This version keeps the model in every record.
 
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -152,7 +155,7 @@ const JOURNAL_DIRS = ['operations', 'kie-operations'];
 /**
  * Every (source, model) an earlier version could have derived an id with: codex, and OpenAI and KIE each with
  * every model known here (the defaults, the model of this call, the models configured now for either source, and
- * the models the kept records name).
+ * the models the kept records name or were recovered for, see recoveredModels).
  */
 function identities(env = {}, model, recorded = []) {
   const models = new Set([DEFAULT_MODELS.openai, DEFAULT_MODELS.kie, model, ...recorded]);
@@ -160,11 +163,42 @@ function identities(env = {}, model, recorded = []) {
     const v = typeof env[name] === 'string' ? env[name].trim() : '';
     if (v && !v.startsWith('${')) models.add(v);
   }
-  models.delete(DEFAULT_MODELS.codex);
-  models.delete(undefined);
-  const out = [{ source: 'codex', model: DEFAULT_MODELS.codex }];
-  for (const source of ['openai', 'kie']) for (const m of models) out.push({ source, model: m });
+  return [{ source: 'codex', model: DEFAULT_MODELS.codex }, ...paidIdentities(models)];
+}
+
+/** OpenAI and KIE, each with every model given (a model name set for one source may have been set for the other). */
+function paidIdentities(models) {
+  const out = [];
+  for (const source of ['openai', 'kie']) for (const m of models) if (m && m !== DEFAULT_MODELS.codex) out.push({ source, model: m });
   return out;
+}
+
+/**
+ * Every automatic id any version derived for this request with the given (source, model) pairs:
+ * [{ id, bound, scoped }] (see earlierRecords).
+ */
+function derivedIds(job, idents) {
+  const { prompt } = job;
+  const project = job.projectDir || null;
+  const aspectRatio = job.aspectRatio || null;
+  const size = job.size || null;
+  const outPath = job.requestedOutPath || null;
+  const resolved = job.references || [];
+  const typed = job.typedReferences || resolved;
+  const ids = [];
+  for (const { source, model: m } of idents) {
+    if (project) {
+      // a15c7cd (named by id) and d107deb to 0a199a1 (named by project and id): references resolved against the project.
+      ids.push({ id: autoId({ source, model: m, project, prompt, references: resolved, aspectRatio, size, outPath }), bound: true, scoped: true });
+      // 816c1ae: references as typed.
+      ids.push({ id: autoId({ source, model: m, project, prompt, references: typed, aspectRatio, size, outPath }), bound: true });
+    }
+    // f0e3ddf and 066b539: no project, references as typed.
+    ids.push({ id: autoId({ source, model: m, prompt, references: typed, aspectRatio, size, outPath }), bound: false });
+    // ac007f2: no source and no project (its KIE route kept these in kie-operations/); KIE runs every model listed.
+    if (source === 'kie') ids.push({ id: autoId({ model: m, prompt, references: typed, aspectRatio, outPath }), bound: false });
+  }
+  return ids;
 }
 
 /**
@@ -187,27 +221,8 @@ export function earlierRecords(job, env, model, recorded = []) {
     for (const dir of JOURNAL_DIRS) add(legacyFile(path.join(root, dir), id), id, false, false);
     return out;
   }
-  const { prompt } = job;
   const project = job.projectDir || null;
-  const aspectRatio = job.aspectRatio || null;
-  const size = job.size || null;
-  const outPath = job.requestedOutPath || null;
-  const resolved = job.references || [];
-  const typed = job.typedReferences || resolved;
-  const ids = [];
-  for (const { source, model: m } of identities(env, model, recorded)) {
-    if (project) {
-      // a15c7cd (named by id) and d107deb to 0a199a1 (named by project and id): references resolved against the project.
-      ids.push({ id: autoId({ source, model: m, project, prompt, references: resolved, aspectRatio, size, outPath }), bound: true, scoped: true });
-      // 816c1ae: references as typed.
-      ids.push({ id: autoId({ source, model: m, project, prompt, references: typed, aspectRatio, size, outPath }), bound: true });
-    }
-    // f0e3ddf and 066b539: no project, references as typed.
-    ids.push({ id: autoId({ source, model: m, prompt, references: typed, aspectRatio, size, outPath }), bound: false });
-    // ac007f2: no source and no project (its KIE route kept these in kie-operations/); KIE runs every model listed.
-    if (source === 'kie') ids.push({ id: autoId({ model: m, prompt, references: typed, aspectRatio, outPath }), bound: false });
-  }
-  for (const { id, bound, scoped } of ids) {
+  for (const { id, bound, scoped } of derivedIds(job, identities(env, model, recorded))) {
     if (scoped) add(scopedFile(job.stateDir, project, id), id, true, true);
     for (const dir of JOURNAL_DIRS) add(legacyFile(path.join(root, dir), id), id, bound, false);
   }
@@ -242,6 +257,49 @@ export function recordedModel(record) {
   if (made) return made[1];
   if (record.provider === 'Codex CLI') return DEFAULT_MODELS.codex;
   return undefined;
+}
+
+/**
+ * Image model names OpenAI and KIE have offered: with the words in a record, the candidates for the model an earlier
+ * version made a record with when the record does not name it. A candidate is used only when an id derived with it
+ * for this request is the id the record holds, so a name that was never used matches nothing.
+ */
+export const KNOWN_MODELS = [
+  'dall-e-2', 'dall-e-3', 'gpt-image-1', 'gpt-image-1-mini', 'gpt-image-1.5', 'gpt-image-2', 'gpt-image-2-mini', 'chatgpt-image-latest',
+  'nano-banana', 'nano-banana-pro', 'nano-banana-2', 'nano-banana-edit', 'google/nano-banana', 'google/nano-banana-edit',
+  'google/nano-banana-pro', 'google/nano-banana-2', 'google/pro-image-to-image', 'gpt-image-2-text-to-image', 'gpt-image-2-image-to-image',
+  'gpt/gpt-image-2-text-to-image', 'gpt/gpt-image-2-image-to-image', 'gpt4o-image', '4o-image', 'seedream-v4', 'seedream-4.0', 'seedream-4.5',
+  'bytedance/seedream-v4-text-to-image', 'bytedance/seedream-v4-edit', 'flux-kontext-pro', 'flux-kontext-max', 'imagen4', 'imagen4-fast',
+  'imagen4-ultra', 'google/imagen4', 'google/imagen4-fast', 'google/imagen4-ultra', 'ideogram/v3', 'qwen/text-to-image', 'qwen/image-edit',
+];
+
+/** Every word in a record's text fields (an error kept as its reason may name the model), as model candidates. */
+function wordsOf(value, out = new Set(), depth = 0) {
+  if (typeof value === 'string') {
+    for (const w of value.split(/[\s"'`()[\]{},;]+/)) {
+      const word = w.replace(/^[.:]+|[.:]+$/g, '');
+      if (word.length > 1 && word.length <= 100) out.add(word);
+    }
+  } else if (value && typeof value === 'object' && depth < 3) {
+    for (const v of Object.values(value)) wordsOf(v, out, depth + 1);
+  }
+  return out;
+}
+
+/**
+ * The models recovered for the automatic-id records an earlier version kept without naming their model (OpenAI and KIE
+ * left submitting, uncertain or failed before acceptance): a candidate (KNOWN_MODELS, or a word in such a record) with
+ * which this request derives the id such a record holds. The lookup then finds that record under its id like any
+ * other; a record whose id no candidate derives is another request's, or one this lookup cannot recover.
+ */
+export function recoveredModels(job, journal) {
+  const unnamed = journal.filter(({ record }) => record && typeof record.operationId === 'string'
+    && record.operationId.startsWith('auto-') && recordedModel(record) === undefined);
+  if (!unnamed.length) return [];
+  const held = new Set(unnamed.map(({ record }) => record.operationId));
+  const candidates = new Set(KNOWN_MODELS);
+  for (const { record } of unnamed) wordsOf(record, candidates);
+  return [...candidates].filter((m) => derivedIds(job, paidIdentities([m])).some(({ id }) => held.has(id)));
 }
 
 /** The provider that wrote a record: its provider field, else KIE for the first KIE journal (kie-operations/). */
@@ -298,9 +356,11 @@ export async function reserveOperation(deps, { job, model, fingerprint, legacy, 
   const operationId = operationIdFor(job);
   const scope = job.projectDir || null;
   const file = scopedFile(stateDir, scope, operationId);
-  // A request without an operationId is looked up under every model a kept record names, so the journal is read first.
+  // A request without an operationId is looked up under every model a kept record names or was recovered for, so the
+  // journal is read first.
   const journal = job.operationId ? [] : await journalRecords(deps, path.dirname(stateDir));
-  const earlier = earlierRecords(job, deps.env, model, journal.map((e) => recordedModel(e.record)).filter(Boolean)).filter((e) => e.file !== file);
+  const recorded = [...journal.map((e) => recordedModel(e.record)).filter(Boolean), ...recoveredModels(job, journal)];
+  const earlier = earlierRecords(job, deps.env, model, recorded).filter((e) => e.file !== file);
   const record = { operationId, project: scope, provider, model, fingerprint, state: 'submitting', reservedAt: deps.now().toISOString() };
   await deps.fs.mkdir(stateDir, { recursive: true });
   if ((await readRecord(deps, file)) === undefined) {

@@ -157,23 +157,22 @@ function writers(models = MODEL) {
   const thisVersion = { codex: ['completed', 'uncertain'], openai: ['completed', 'uncertain'], kie: ['accepted', 'completed', 'failed', 'uncertain'] };
   // ac007f2: KIE only, kie-operations/, only accepted tasks are left on disk (finished ones were removed).
   out.push({
-    name: 'ac007f2 kie accepted (kie-operations/)', route: 'kie', namesModel: true,
+    name: 'ac007f2 kie accepted (kie-operations/)', route: 'kie',
     write: async (s, args, id) => seed(s.env, 'kie-operations', id, { taskId: 'task-old', model: models.kie, outPath: path.join(s.A, 'ad.png'), acceptedAt: '2026-10-03T10:00:00.000Z' }),
     derivedId: (s, args) => autoId({ model: models.kie, prompt: args.prompt, references: args.references || [], aspectRatio: null, outPath: args.outPath }),
   });
   // f0e3ddf, 066b539, 816c1ae, a15c7cd: operations/, sha('op:' + id), no project field.
   for (const route of ROUTES) {
     for (const state of states[route]) {
-      const namesModel = route === 'codex' || state === 'completed' || (route === 'kie' && state !== 'submitting' && state !== 'uncertain');
       const write = async (s, args, id, refsSeen) => seed(s.env, 'operations', id, legacyRecord(route, state, s.A, legacyFingerprint(route, args.prompt, refsSeen, models), models), state === 'completed' ? PNG : null);
       // f0e3ddf and 066b539: no project in the automatic id, references as typed.
-      out.push({ name: `f0e3ddf/066b539 ${route} ${state}`, route, write, refs: 'typed', namesModel,
+      out.push({ name: `f0e3ddf/066b539 ${route} ${state}`, route, write, refs: 'typed',
         derivedId: (s, args) => autoId({ source: route, model: models[route], prompt: args.prompt, references: args.references || [], aspectRatio: null, size: null, outPath: args.outPath }) });
       // 816c1ae: the canonical project in the automatic id, references as typed.
-      out.push({ name: `816c1ae ${route} ${state}`, route, write, refs: 'typed', namesModel,
+      out.push({ name: `816c1ae ${route} ${state}`, route, write, refs: 'typed',
         derivedId: (s, args) => autoId({ source: route, model: models[route], project: s.project, prompt: args.prompt, references: args.references || [], aspectRatio: null, size: null, outPath: args.outPath }) });
       // a15c7cd: the canonical project in the automatic id, references resolved against the project.
-      out.push({ name: `a15c7cd ${route} ${state}`, route, write, refs: 'resolved', namesModel,
+      out.push({ name: `a15c7cd ${route} ${state}`, route, write, refs: 'resolved',
         derivedId: (s, args) => autoId({ source: route, model: models[route], project: s.project, prompt: args.prompt, references: resolved(s, args), aspectRatio: null, size: null, outPath: args.outPath }) });
     }
   }
@@ -181,15 +180,14 @@ function writers(models = MODEL) {
   // model (references resolved against the project), the record holding the project and the current fingerprint.
   for (const route of ROUTES) {
     for (const state of states[route]) {
-      const namesModel = route === 'codex' || state === 'completed' || (route === 'kie' && state !== 'submitting' && state !== 'uncertain');
-      out.push({ name: `d107deb..0a199a1 ${route} ${state}`, route, namesModel,
+      out.push({ name: `d107deb..0a199a1 ${route} ${state}`, route,
         write: async (s, args, id) => seedScoped(s, id, { ...legacyRecord(route, state, s.A, scopedFingerprint(s, route, args, models), models), project: s.project }, state === 'completed' ? PNG : null),
         derivedId: (s, args) => autoId({ source: route, model: models[route], project: s.project, prompt: args.prompt, references: resolved(s, args), aspectRatio: null, size: null, outPath: args.outPath }) });
     }
   }
   // This version: made by running it.
   for (const route of ROUTES) {
-    for (const outcome of thisVersion[route]) out.push({ name: `this version ${route} ${outcome}`, route, namesModel: true, live: (s, args) => writeWithThisVersion(s, route, outcome, args, models) });
+    for (const outcome of thisVersion[route]) out.push({ name: `this version ${route} ${outcome}`, route, live: (s, args) => writeWithThisVersion(s, route, outcome, args, models) });
   }
   return out;
 }
@@ -209,7 +207,7 @@ async function retry(s, routeB, args) {
  * OpenAI and KIE models the record was made with (set as the model settings while this version writes); retryEnv
  * then changes the settings before the retry (the user removed or replaced them in between).
  */
-async function matrix(models = MODEL, retryEnv = () => {}, withoutId = () => true) {
+async function matrix(models = MODEL, retryEnv = () => {}) {
   const failures = [];
   let pairs = 0;
   for (const w of writers(models)) {
@@ -227,7 +225,6 @@ async function matrix(models = MODEL, retryEnv = () => {}, withoutId = () => tru
     // image source in between): the id is derived again, under every form any version derived it, for every route.
     // References: none, a link (every route takes links) and a local file as typed (codex and OpenAI only; KIE takes
     // links only).
-    if (!withoutId(w)) continue;
     const refVariants = [[], ['https://cdn.example/logo.png'], ...(w.route === 'kie' ? [] : [['logo.png']])];
     for (const references of refVariants) {
       for (const routeB of ROUTES) {
@@ -255,17 +252,16 @@ test('invariant: a recorded operation is never submitted again, for every (versi
 // The same matrix for records made with configured (non-default) OpenAI and KIE models, retried after the user removed
 // those model settings, or replaced them with other models: the record's model is no longer configured anywhere.
 // (The KIE models take reference links, so a retry on KIE reaches createTask when the lookup misses.)
-// Every record that names its model is found under it. A record an earlier version kept without its model, made with a
-// model no longer known, matches no id the request derives and is left alone (it blocks nothing; see the lookup tests
-// below), so its pairs without an operationId are not in these two matrices; with the default models (the matrix
-// above) it is found and refused. A given operationId needs no model: every writer's explicit-id pairs run here too.
+// Every writer runs here, also the records an earlier version kept without their model (OpenAI and KIE left
+// submitting, uncertain or failed before acceptance): the lookup recovers the model such a record was made with from
+// the image models it knows of and the words in the record, and finds it under the id derived with that model.
 const CUSTOM = { codex: 'codex', openai: 'gpt-image-1.5', kie: 'nano-banana-2' };
 for (const [change, retryEnv] of [
   ['removed', (env) => { delete env.SPRENG_IMAGES_OPENAI_MODEL; delete env.SPRENG_IMAGES_KIE_MODEL; }],
   ['replaced', (env) => { env.SPRENG_IMAGES_OPENAI_MODEL = 'gpt-image-1'; env.SPRENG_IMAGES_KIE_MODEL = 'gpt-image-2'; }],
 ]) {
   test(`invariant: a recorded operation made with configured models is never submitted again after those model settings are ${change}`, async () => {
-    const { failures, pairs } = await matrix(CUSTOM, retryEnv, (w) => w.namesModel);
+    const { failures, pairs } = await matrix(CUSTOM, retryEnv);
     assert.ok(pairs > 250, `the matrix ran (${pairs} pairs)`);
     assert.deepEqual(failures, [], `${failures.length} of ${pairs} pairs bought the same operation again:\n${failures.join('\n')}`);
   });
@@ -316,6 +312,25 @@ test('lookup: an earlier record without its model still refuses the same request
       const r = await retry(s, routeB, args);
       assert.equal(r.submissions, 0, `${route} record, retry on ${routeB}: ${r.outcome}`);
       assert.match(r.outcome, /^refused: /);
+    }
+  }
+});
+
+test('lookup: an earlier record without its model, made with a model setting removed since, is recovered and refuses the same request', async () => {
+  // gpt-image-1.5 was configured when an earlier version left this OpenAI record uncertain (no model field); the
+  // setting is gone, so neither the defaults nor the settings nor another record name it.
+  for (const [model, reason] of [['gpt-image-1.5', 'socket hang up'], ['acme-image-7', 'HTTP 404: The model `acme-image-7` does not exist']]) {
+    for (const routeB of ROUTES) {
+      const s = await sandbox();
+      const args = { prompt: 'p', outPath: 'ad.png' };
+      const id = autoId({ source: 'openai', model, project: s.project, prompt: 'p', references: [], aspectRatio: null, size: null, outPath: 'ad.png' });
+      await seed(s.env, 'operations', id, { ...legacyRecord('openai', 'uncertain', s.A, legacyFingerprint('openai', 'p', [], { openai: model })), reason });
+      const r = await retry(s, routeB, args);
+      assert.equal(r.submissions, 0, `${model} record, retry on ${routeB}: ${r.outcome}`);
+      assert.match(r.outcome, /^refused: /);
+      // Another request in the same project is still made.
+      const other = await retry(s, routeB, { prompt: 'another', outPath: 'b.png' });
+      assert.deepEqual(other, { submissions: 1, outcome: 'returned' }, `${model} record, another request on ${routeB}`);
     }
   }
 });
