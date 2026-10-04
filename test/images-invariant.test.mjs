@@ -83,30 +83,37 @@ async function seedScoped(s, operationId, record, image) {
 }
 
 /** The fingerprint d107deb to 0a199a1 gave a request: the route's fields, the project, the prompt, a hash per reference. */
-function scopedFingerprint(s, route, args) {
+function scopedFingerprint(s, route, args, models = MODEL) {
   const hashes = (args.references || []).map((r) => (/^https?:\/\//i.test(r) ? sha('url:' + r) : sha('logo')));
-  const fields = route === 'codex' ? { source: 'codex' } : route === 'openai' ? { source: 'openai', model: MODEL.openai, size: null } : { source: 'kie', model: MODEL.kie, aspectRatio: null };
+  const fields = route === 'codex' ? { source: 'codex' } : route === 'openai' ? { source: 'openai', model: models.openai, size: null } : { source: 'kie', model: models.kie, aspectRatio: null };
   return sha(JSON.stringify({ ...fields, project: s.project, prompt: args.prompt, references: hashes }));
 }
 
 /** The fingerprint the earlier journal gave a request on a route (references as that version saw them). */
-function legacyFingerprint(route, prompt, references) {
+function legacyFingerprint(route, prompt, references, models = MODEL) {
   if (route === 'codex') return sha(JSON.stringify({ source: 'codex', prompt, references }));
-  if (route === 'openai') return sha(JSON.stringify({ source: 'openai', model: MODEL.openai, prompt, references, size: null }));
-  return sha(JSON.stringify({ source: 'kie', model: MODEL.kie, prompt, references, aspectRatio: null }));
+  if (route === 'openai') return sha(JSON.stringify({ source: 'openai', model: models.openai, prompt, references, size: null }));
+  return sha(JSON.stringify({ source: 'kie', model: models.kie, prompt, references, aspectRatio: null }));
 }
 
-/** The fields of a record in a given state, as the earlier journal (f0e3ddf to a15c7cd) kept them. */
-function legacyRecord(route, state, A, fingerprint) {
+/**
+ * The fields of a record in a given state, as the earlier journals (f0e3ddf to c4b1a73) kept them: KIE keeps its
+ * model once the task is accepted (and so in completed, and failed after acceptance), a completed record keeps the
+ * route's madeBy (which names the OpenAI or KIE model), and nothing else names the model.
+ */
+function legacyRecord(route, state, A, fingerprint, models = MODEL) {
   const rec = { provider: PROVIDER[route], fingerprint, state, reservedAt: '2026-10-03T10:00:00.000Z' };
   if (state === 'uncertain' || state === 'failed') rec.reason = 'seeded';
-  if (state === 'accepted') Object.assign(rec, { taskId: 'task-old', model: MODEL.kie, outPath: path.join(A, 'ad.png') });
-  if (state === 'completed') Object.assign(rec, { outPath: path.join(A, 'ad.png'), result: { source: route } });
+  if (route === 'kie' && ['accepted', 'completed', 'failed'].includes(state)) Object.assign(rec, { taskId: 'task-old', model: models.kie, outPath: path.join(A, 'ad.png') });
+  const madeBy = { codex: 'Codex CLI image tool', openai: `OpenAI ${models.openai} on the user's key`, kie: `KIE ${models.kie} on the user's key` }[route];
+  if (state === 'completed') Object.assign(rec, { outPath: path.join(A, 'ad.png'), result: { source: route, madeBy } });
   return rec;
 }
 
 /** Run this version on route A with a given outcome, leaving its record in the journal. */
-async function writeWithThisVersion(s, route, outcome, args) {
+async function writeWithThisVersion(s, route, outcome, args, models = MODEL) {
+  if (models.openai !== MODEL.openai) s.env.SPRENG_IMAGES_OPENAI_MODEL = models.openai;
+  if (models.kie !== MODEL.kie) s.env.SPRENG_IMAGES_KIE_MODEL = models.kie;
   await callTool('set_image_source', { source: route }, s.deps);
   // Reference links download on every route (codex and OpenAI take files); only the paid calls below have outcomes.
   s.deps.fetch = async () => res(200, null);
@@ -142,45 +149,47 @@ async function writeWithThisVersion(s, route, outcome, args) {
   await callTool('make_image', args, s.deps).catch(() => {});
 }
 
-// Every way a version of this add-on recorded an operation. Each writer gets the request args it was made with and
-// returns nothing; the record is left in the journal.
-function writers() {
+// Every way a version of this add-on recorded an operation, with the OpenAI and KIE models it was made with. Each
+// writer gets the request args it was made with and returns nothing; the record is left in the journal.
+function writers(models = MODEL) {
   const out = [];
   const states = { codex: ['submitting', 'uncertain', 'completed', 'failed'], openai: ['submitting', 'uncertain', 'completed', 'failed'], kie: ['submitting', 'uncertain', 'accepted', 'completed', 'failed'] };
   const thisVersion = { codex: ['completed', 'uncertain'], openai: ['completed', 'uncertain'], kie: ['accepted', 'completed', 'failed', 'uncertain'] };
   // ac007f2: KIE only, kie-operations/, only accepted tasks are left on disk (finished ones were removed).
   out.push({
-    name: 'ac007f2 kie accepted (kie-operations/)', route: 'kie',
-    write: async (s, args, id) => seed(s.env, 'kie-operations', id, { taskId: 'task-old', model: MODEL.kie, outPath: path.join(s.A, 'ad.png'), acceptedAt: '2026-10-03T10:00:00.000Z' }),
-    derivedId: (s, args) => autoId({ model: MODEL.kie, prompt: args.prompt, references: args.references || [], aspectRatio: null, outPath: args.outPath }),
+    name: 'ac007f2 kie accepted (kie-operations/)', route: 'kie', namesModel: true,
+    write: async (s, args, id) => seed(s.env, 'kie-operations', id, { taskId: 'task-old', model: models.kie, outPath: path.join(s.A, 'ad.png'), acceptedAt: '2026-10-03T10:00:00.000Z' }),
+    derivedId: (s, args) => autoId({ model: models.kie, prompt: args.prompt, references: args.references || [], aspectRatio: null, outPath: args.outPath }),
   });
   // f0e3ddf, 066b539, 816c1ae, a15c7cd: operations/, sha('op:' + id), no project field.
   for (const route of ROUTES) {
     for (const state of states[route]) {
-      const write = async (s, args, id, refsSeen) => seed(s.env, 'operations', id, legacyRecord(route, state, s.A, legacyFingerprint(route, args.prompt, refsSeen)), state === 'completed' ? PNG : null);
+      const namesModel = route === 'codex' || state === 'completed' || (route === 'kie' && state !== 'submitting' && state !== 'uncertain');
+      const write = async (s, args, id, refsSeen) => seed(s.env, 'operations', id, legacyRecord(route, state, s.A, legacyFingerprint(route, args.prompt, refsSeen, models), models), state === 'completed' ? PNG : null);
       // f0e3ddf and 066b539: no project in the automatic id, references as typed.
-      out.push({ name: `f0e3ddf/066b539 ${route} ${state}`, route, write, refs: 'typed',
-        derivedId: (s, args) => autoId({ source: route, model: MODEL[route], prompt: args.prompt, references: args.references || [], aspectRatio: null, size: null, outPath: args.outPath }) });
+      out.push({ name: `f0e3ddf/066b539 ${route} ${state}`, route, write, refs: 'typed', namesModel,
+        derivedId: (s, args) => autoId({ source: route, model: models[route], prompt: args.prompt, references: args.references || [], aspectRatio: null, size: null, outPath: args.outPath }) });
       // 816c1ae: the canonical project in the automatic id, references as typed.
-      out.push({ name: `816c1ae ${route} ${state}`, route, write, refs: 'typed',
-        derivedId: (s, args) => autoId({ source: route, model: MODEL[route], project: s.project, prompt: args.prompt, references: args.references || [], aspectRatio: null, size: null, outPath: args.outPath }) });
+      out.push({ name: `816c1ae ${route} ${state}`, route, write, refs: 'typed', namesModel,
+        derivedId: (s, args) => autoId({ source: route, model: models[route], project: s.project, prompt: args.prompt, references: args.references || [], aspectRatio: null, size: null, outPath: args.outPath }) });
       // a15c7cd: the canonical project in the automatic id, references resolved against the project.
-      out.push({ name: `a15c7cd ${route} ${state}`, route, write, refs: 'resolved',
-        derivedId: (s, args) => autoId({ source: route, model: MODEL[route], project: s.project, prompt: args.prompt, references: resolved(s, args), aspectRatio: null, size: null, outPath: args.outPath }) });
+      out.push({ name: `a15c7cd ${route} ${state}`, route, write, refs: 'resolved', namesModel,
+        derivedId: (s, args) => autoId({ source: route, model: models[route], project: s.project, prompt: args.prompt, references: resolved(s, args), aspectRatio: null, size: null, outPath: args.outPath }) });
     }
   }
   // d107deb to 0a199a1: operations/, file named by sha(['op', project, id]), the id derived with the route's source and
   // model (references resolved against the project), the record holding the project and the current fingerprint.
   for (const route of ROUTES) {
     for (const state of states[route]) {
-      out.push({ name: `d107deb..0a199a1 ${route} ${state}`, route,
-        write: async (s, args, id) => seedScoped(s, id, { ...legacyRecord(route, state, s.A, scopedFingerprint(s, route, args)), project: s.project }, state === 'completed' ? PNG : null),
-        derivedId: (s, args) => autoId({ source: route, model: MODEL[route], project: s.project, prompt: args.prompt, references: resolved(s, args), aspectRatio: null, size: null, outPath: args.outPath }) });
+      const namesModel = route === 'codex' || state === 'completed' || (route === 'kie' && state !== 'submitting' && state !== 'uncertain');
+      out.push({ name: `d107deb..0a199a1 ${route} ${state}`, route, namesModel,
+        write: async (s, args, id) => seedScoped(s, id, { ...legacyRecord(route, state, s.A, scopedFingerprint(s, route, args, models), models), project: s.project }, state === 'completed' ? PNG : null),
+        derivedId: (s, args) => autoId({ source: route, model: models[route], project: s.project, prompt: args.prompt, references: resolved(s, args), aspectRatio: null, size: null, outPath: args.outPath }) });
     }
   }
   // This version: made by running it.
   for (const route of ROUTES) {
-    for (const outcome of thisVersion[route]) out.push({ name: `this version ${route} ${outcome}`, route, live: (s, args) => writeWithThisVersion(s, route, outcome, args) });
+    for (const outcome of thisVersion[route]) out.push({ name: `this version ${route} ${outcome}`, route, namesModel: true, live: (s, args) => writeWithThisVersion(s, route, outcome, args, models) });
   }
   return out;
 }
@@ -195,15 +204,21 @@ async function retry(s, routeB, args) {
   return { submissions: count.submissions, outcome };
 }
 
-test('invariant: a recorded operation is never submitted again, for every (version/route that wrote it) x (route it is retried on)', async () => {
+/**
+ * Run every (writer) x (retry route) pair and return the pairs that bought the operation again. models are the
+ * OpenAI and KIE models the record was made with (set as the model settings while this version writes); retryEnv
+ * then changes the settings before the retry (the user removed or replaced them in between).
+ */
+async function matrix(models = MODEL, retryEnv = () => {}) {
   const failures = [];
   let pairs = 0;
-  for (const w of writers()) {
+  for (const w of writers(models)) {
     // 1) The same explicit operationId, retried on every route (the user switched image source in between).
     for (const routeB of ROUTES) {
       const s = await sandbox();
       const args = { prompt: 'p', operationId: 'op-1', outPath: 'ad.png' };
       if (w.live) await w.live(s, args); else await w.write(s, args, 'op-1', []);
+      retryEnv(s.env);
       const { submissions, outcome } = await retry(s, routeB, args);
       pairs++;
       if (submissions !== 0) failures.push(`${w.name} -> retry on ${routeB} with operationId: ${submissions} new submission(s) (${outcome})`);
@@ -220,14 +235,88 @@ test('invariant: a recorded operation is never submitted again, for every (versi
         const args = { prompt: 'p', outPath: 'ad.png', ...(references.length ? { references } : {}) };
         if (w.live) await w.live(s, args);
         else await w.write(s, args, w.derivedId(s, args), w.refs === 'resolved' ? resolved(s, args) : references);
+        retryEnv(s.env);
         const { submissions, outcome } = await retry(s, routeB, args);
         pairs++;
         if (submissions !== 0) failures.push(`${w.name} -> retry on ${routeB} without operationId, references ${JSON.stringify(references)}: ${submissions} new submission(s) (${outcome})`);
+        // A record that names its model is found under its own id, not only refused for want of one.
+        else if (w.namesModel && / was not sent: the record /.test(outcome)) failures.push(`${w.name} -> retry on ${routeB} without operationId, references ${JSON.stringify(references)}: not found by its model (${outcome})`);
       }
     }
   }
+  return { failures, pairs };
+}
+
+test('invariant: a recorded operation is never submitted again, for every (version/route that wrote it) x (route it is retried on)', async () => {
+  const { failures, pairs } = await matrix();
   assert.ok(pairs > 400, `the matrix ran (${pairs} pairs)`);
   assert.deepEqual(failures, [], `${failures.length} of ${pairs} pairs bought the same operation again:\n${failures.join('\n')}`);
+});
+
+// The same matrix for records made with configured (non-default) OpenAI and KIE models, retried after the user removed
+// those model settings, or replaced them with other models: the record's model is no longer configured anywhere.
+// (The KIE models take reference links, so a retry on KIE reaches createTask when the lookup misses.)
+const CUSTOM = { codex: 'codex', openai: 'gpt-image-1.5', kie: 'nano-banana-2' };
+for (const [change, retryEnv] of [
+  ['removed', (env) => { delete env.SPRENG_IMAGES_OPENAI_MODEL; delete env.SPRENG_IMAGES_KIE_MODEL; }],
+  ['replaced', (env) => { env.SPRENG_IMAGES_OPENAI_MODEL = 'gpt-image-1'; env.SPRENG_IMAGES_KIE_MODEL = 'gpt-image-2'; }],
+]) {
+  test(`invariant: a recorded operation made with configured models is never submitted again after those model settings are ${change}`, async () => {
+    const { failures, pairs } = await matrix(CUSTOM, retryEnv);
+    assert.ok(pairs > 400, `the matrix ran (${pairs} pairs)`);
+    assert.deepEqual(failures, [], `${failures.length} of ${pairs} pairs bought the same operation again:\n${failures.join('\n')}`);
+  });
+}
+
+test('invariant: an accepted ac007f2 KIE task made with seedream-v4 is not bought again on OpenAI after the KIE model setting is removed', async () => {
+  const s = await sandbox();
+  const args = { prompt: 'p', outPath: 'ad.png' };
+  await seed(s.env, 'kie-operations', autoId({ model: 'seedream-v4', prompt: 'p', references: [], aspectRatio: null, outPath: 'ad.png' }), {
+    taskId: 'task-old', model: 'seedream-v4', outPath: path.join(s.A, 'ad.png'), acceptedAt: '2026-10-03T10:00:00.000Z',
+  });
+  const { submissions, outcome } = await retry(s, 'openai', args);
+  assert.equal(submissions, 0, outcome);
+  assert.match(outcome, /^refused: /);
+  assert.doesNotMatch(outcome, / was not sent: the record /, 'found under the model its record names');
+});
+
+test('lookup: a kept record that does not name its model, or cannot be read, refuses a request without an operationId; a given operationId is its own operation', async () => {
+  for (const kind of ['model unknown', 'unreadable']) {
+    const s = await sandbox();
+    // Another request (or this one, made with a model no longer configured): the id cannot be derived again.
+    const file = path.join(s.env.CLAUDE_PLUGIN_DATA, 'operations', 'b'.repeat(32) + '.json');
+    await fs.mkdir(path.dirname(file), { recursive: true });
+    await fs.writeFile(file, kind === 'unreadable' ? '{"operationId":"auto-' : JSON.stringify({
+      operationId: 'auto-0123456789abcdef', provider: 'OpenAI', fingerprint: 'f', state: 'uncertain', reason: 'HTTP 502', reservedAt: '2026-10-03T10:00:00.000Z',
+    }));
+    for (const route of ROUTES) {
+      const { submissions, outcome } = await retry(s, route, { prompt: 'p', outPath: 'ad.png' });
+      assert.equal(submissions, 0, `${kind} on ${route}: ${outcome}`);
+      assert.match(outcome, /^refused: Operation auto-[0-9a-f]+ was not sent: the record /);
+    }
+    await assert.rejects(callTool('make_image', { prompt: 'p', outPath: 'ad.png' }, s.deps), (e) => e.message.includes(file), 'the refusal names the record');
+    const given = await retry(s, 'openai', { prompt: 'p', outPath: 'ad.png', operationId: 'claim-new' });
+    assert.deepEqual(given, { submissions: 1, outcome: 'returned' }, kind);
+  }
+});
+
+test('lookup: records naming their model (and every record this version keeps) never refuse another request', async () => {
+  const s = await sandbox();
+  s.env.SPRENG_IMAGES_OPENAI_MODEL = 'gpt-image-1.5';
+  // This version, an unclear OpenAI outcome for one request, with a model setting removed afterwards.
+  await callTool('set_image_source', { source: 'openai' }, s.deps);
+  s.deps.fetch = async (url, init = {}) => { if (init.method === 'POST') throw new Error('socket hang up'); return res(200, null); };
+  await assert.rejects(callTool('make_image', { prompt: 'first', outPath: 'a.png' }, s.deps), /unclear outcome/);
+  const kept = JSON.parse(await fs.readFile(path.join(s.env.CLAUDE_PLUGIN_DATA, 'operations', (await fs.readdir(path.join(s.env.CLAUDE_PLUGIN_DATA, 'operations')))[0]), 'utf8'));
+  assert.equal(kept.model, 'gpt-image-1.5', 'the record names its model');
+  delete s.env.SPRENG_IMAGES_OPENAI_MODEL;
+  // An earlier version's accepted KIE task (names its model) and completed OpenAI image (madeBy names it).
+  await seed(s.env, 'operations', autoId({ source: 'kie', model: 'seedream-v4', prompt: 'other', references: [], aspectRatio: null, size: null, outPath: 'b.png' }), { provider: 'KIE', fingerprint: 'f', state: 'accepted', taskId: 't', model: 'seedream-v4' });
+  await seed(s.env, 'operations', autoId({ source: 'openai', model: 'gpt-image-1', prompt: 'other', references: [], aspectRatio: null, size: null, outPath: 'c.png' }), { provider: 'OpenAI', fingerprint: 'f', state: 'completed', result: { source: 'openai', madeBy: "OpenAI gpt-image-1 on the user's key" } });
+  for (const route of ROUTES) {
+    const r = await retry(s, route, { prompt: `second ${route}`, outPath: `${route}.png` });
+    assert.deepEqual(r, { submissions: 1, outcome: 'returned' }, route);
+  }
 });
 
 test('invariant: a request made with a configured (non-default) KIE model is not bought again on OpenAI, from this version or the first journal', async () => {

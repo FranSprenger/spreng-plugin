@@ -46,6 +46,8 @@ async function seedLegacy(env, operationId, record, image) {
   }
   await fs.writeFile(`${base}.json`, JSON.stringify(rec, null, 2));
 }
+// What every earlier version kept as the result of a completed OpenAI image (its madeBy names the model).
+const OPENAI_RESULT = { source: 'openai', madeBy: "OpenAI gpt-image-2 on the user's key" };
 // The earlier fingerprints, field for field.
 const legacyOpenAI = (prompt, references = [], size = null, model = 'gpt-image-2') => sha(JSON.stringify({ source: 'openai', model, prompt, references, size }));
 const legacyKie = (prompt, references = [], aspectRatio = null, model = 'nano-banana-pro') => sha(JSON.stringify({ source: 'kie', model, prompt, references, aspectRatio }));
@@ -76,7 +78,7 @@ test('upgrade: a completed earlier record with a given id names no project, so i
   // The earlier server saved outPath inside project A, but an image path is no proof of the project (a parent
   // folder contains it too), and the record names no project.
   await seedLegacy(env, 'claim-u3', {
-    provider: 'OpenAI', fingerprint: legacyOpenAI('p'), state: 'completed', outPath: path.join(A, 'ad.png'), result: { source: 'openai' },
+    provider: 'OpenAI', fingerprint: legacyOpenAI('p'), state: 'completed', outPath: path.join(A, 'ad.png'), result: OPENAI_RESULT,
   }, 'kept-image-A');
   let posts = 0;
   deps.fetch = async () => { posts++; return res(200, { data: [{ b64_json: b64('new') }] }); };
@@ -91,7 +93,7 @@ test('upgrade: a completed earlier record with a given id names no project, so i
 test('upgrade: an earlier given-id record for a different request is refused, not resent', async () => {
   const { deps, env, A, inProject } = await sandbox('openai', { SPRENG_IMAGES_OPENAI_KEY: OPENAI_KEY });
   await seedLegacy(env, 'claim-u4', {
-    provider: 'OpenAI', fingerprint: legacyOpenAI('another prompt'), state: 'completed', outPath: path.join(A, 'ad.png'), result: {},
+    provider: 'OpenAI', fingerprint: legacyOpenAI('another prompt'), state: 'completed', outPath: path.join(A, 'ad.png'), result: OPENAI_RESULT,
   }, 'kept');
   let posts = 0;
   deps.fetch = async () => { posts++; return res(200, { data: [{ b64_json: b64('new') }] }); };
@@ -208,10 +210,10 @@ test('upgrade: a completed automatic-id OpenAI request from before project scopi
   const plain = { prompt: 'p', outPath: 'ad.png' };
   const withRef = { prompt: 'q', references: ['brand/logo.png'], outPath: 'ad2.png' };
   await seedAt(env, 'operations', autoV2({ source: 'openai', model: 'gpt-image-2', prompt: 'p', outPath: 'ad.png' }), {
-    provider: 'OpenAI', fingerprint: legacyOpenAI('p'), state: 'completed', outPath: path.join(A, 'ad.png'), result: { source: 'openai' },
+    provider: 'OpenAI', fingerprint: legacyOpenAI('p'), state: 'completed', outPath: path.join(A, 'ad.png'), result: OPENAI_RESULT,
   }, 'kept-p');
   await seedAt(env, 'operations', autoV2({ source: 'openai', model: 'gpt-image-2', prompt: 'q', references: ['brand/logo.png'], outPath: 'ad2.png' }), {
-    provider: 'OpenAI', fingerprint: legacyOpenAI('q', ['brand/logo.png']), state: 'completed', outPath: path.join(A, 'ad2.png'), result: { source: 'openai' },
+    provider: 'OpenAI', fingerprint: legacyOpenAI('q', ['brand/logo.png']), state: 'completed', outPath: path.join(A, 'ad2.png'), result: OPENAI_RESULT,
   }, 'kept-q');
   let posts = 0;
   deps.fetch = async () => { posts++; return res(200, { data: [{ b64_json: b64('new') }] }); };
@@ -231,11 +233,11 @@ test('upgrade: an automatic-id request from the project-scoped versions is repla
   const resolved = path.join(project, 'brand', 'logo.png');
   // 816c1ae: references as typed.
   await seedAt(env, 'operations', autoV3({ source: 'openai', model: 'gpt-image-2', project, prompt: 'p', references: ['brand/logo.png'], outPath: 'ad.png' }), {
-    provider: 'OpenAI', fingerprint: legacyOpenAI('p', ['brand/logo.png']), state: 'completed', outPath: path.join(A, 'ad.png'), result: { source: 'openai' },
+    provider: 'OpenAI', fingerprint: legacyOpenAI('p', ['brand/logo.png']), state: 'completed', outPath: path.join(A, 'ad.png'), result: OPENAI_RESULT,
   }, 'kept-typed');
   // a15c7cd: references resolved against the project.
   await seedAt(env, 'operations', autoV3({ source: 'openai', model: 'gpt-image-2', project, prompt: 'q', references: [resolved], outPath: 'ad2.png' }), {
-    provider: 'OpenAI', fingerprint: legacyOpenAI('q', [resolved]), state: 'completed', outPath: path.join(A, 'ad2.png'), result: { source: 'openai' },
+    provider: 'OpenAI', fingerprint: legacyOpenAI('q', [resolved]), state: 'completed', outPath: path.join(A, 'ad2.png'), result: OPENAI_RESULT,
   }, 'kept-resolved');
   let posts = 0;
   deps.fetch = async () => { posts++; return res(200, { data: [{ b64_json: b64('new') }] }); };
@@ -286,7 +288,7 @@ test('nested projects: an earlier record whose image sits in /clients/A is never
   const child = path.join(parent, 'A');
   await fs.mkdir(child, { recursive: true });
   await seedLegacy(env, 'claim-n1', {
-    provider: 'OpenAI', fingerprint: legacyOpenAI('p'), state: 'completed', outPath: path.join(child, 'ad.png'), result: { source: 'openai' },
+    provider: 'OpenAI', fingerprint: legacyOpenAI('p'), state: 'completed', outPath: path.join(child, 'ad.png'), result: OPENAI_RESULT,
   }, 'child-image');
   let posts = 0;
   deps.fetch = async () => { posts++; return res(200, { data: [{ b64_json: b64('new') }] }); };
@@ -322,7 +324,7 @@ test('nested projects: an automatic-id record made in /clients/A (project-scoped
   await fs.mkdir(child, { recursive: true });
   const project = await fs.realpath(child);
   await seedAt(env, 'operations', autoV3({ source: 'openai', model: 'gpt-image-2', project, prompt: 'p', outPath: 'ad.png' }), {
-    provider: 'OpenAI', fingerprint: legacyOpenAI('p'), state: 'completed', outPath: path.join(child, 'ad.png'), result: { source: 'openai' },
+    provider: 'OpenAI', fingerprint: legacyOpenAI('p'), state: 'completed', outPath: path.join(child, 'ad.png'), result: OPENAI_RESULT,
   }, 'child-image');
   let posts = 0;
   deps.fetch = async () => { posts++; return res(200, { data: [{ b64_json: b64('parent image') }] }); };

@@ -35,11 +35,19 @@
 // Records any earlier version kept are checked before a new record is made, by one lookup (earlierRecords) that
 // reserveOperation runs for every route: every folder (operations/, and kie-operations/ for the first KIE journal),
 // both file namings (one file per id; one per project and id from d107deb on), the given id or every id any version
-// derived for the same request under every source and model (the defaults and the models configured now), whichever
-// provider wrote it. Such a record moves to this project only when it is proven to be this project's (its id holds
-// this exact canonical project folder) and is the same request on the same route; a record of the same request on
-// another route refuses the operation, naming that provider; every other earlier record stays unresolved: the
-// operation is refused, nothing is sent and nothing from that record is used.
+// derived for the same request under every source and model, whichever provider wrote it. The models are the
+// defaults, the models configured now, and every model a kept record names (its model field, or the madeBy of a
+// completed one), so a model setting removed or replaced since still finds its records. Such a record moves to this
+// project only when it is proven to be this project's (its id holds this exact canonical project folder) and is the
+// same request on the same route; a record of the same request on another route refuses the operation, naming that
+// provider; every other earlier record stays unresolved: the operation is refused, nothing is sent and nothing from
+// that record is used.
+//
+// Earlier versions derived automatic ids with the model in them but kept the model only once KIE accepted a task or
+// the image was made, so an OpenAI or KIE record they left submitting, uncertain or failed does not say which model
+// it was made with; when that model is no longer configured, its id cannot be derived again. Such a record (and any
+// record that cannot be read) may be this same request, so a request without an operationId is refused while one is
+// kept in its project or in no project: nothing is sent. This version keeps the model in every record.
 
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -142,10 +150,11 @@ const JOURNAL_DIRS = ['operations', 'kie-operations'];
 
 /**
  * Every (source, model) an earlier version could have derived an id with: codex, and OpenAI and KIE each with
- * every model known here (the defaults, the model of this call, and the models configured now for either source).
+ * every model known here (the defaults, the model of this call, the models configured now for either source, and
+ * the models the kept records name).
  */
-function identities(env = {}, model) {
-  const models = new Set([DEFAULT_MODELS.openai, DEFAULT_MODELS.kie, model]);
+function identities(env = {}, model, recorded = []) {
+  const models = new Set([DEFAULT_MODELS.openai, DEFAULT_MODELS.kie, model, ...recorded]);
   for (const name of MODEL_SETTINGS) {
     const v = typeof env[name] === 'string' ? env[name].trim() : '';
     if (v && !v.startsWith('${')) models.add(v);
@@ -167,7 +176,7 @@ function identities(env = {}, model) {
  * project was part of it, proves nothing about the project); scoped marks a file named by project and id
  * (d107deb to 0a199a1), whose record holds the current fingerprint.
  */
-export function earlierRecords(job, env, model) {
+export function earlierRecords(job, env, model, recorded = []) {
   const root = path.dirname(job.stateDir);
   const out = [];
   const add = (file, operationId, bound, scoped) => { if (!out.some((e) => e.file === file)) out.push({ file, operationId, bound, scoped }); };
@@ -185,7 +194,7 @@ export function earlierRecords(job, env, model) {
   const resolved = job.references || [];
   const typed = job.typedReferences || resolved;
   const ids = [];
-  for (const { source, model: m } of identities(env, model)) {
+  for (const { source, model: m } of identities(env, model, recorded)) {
     if (project) {
       // a15c7cd (named by id) and d107deb to 0a199a1 (named by project and id): references resolved against the project.
       ids.push({ id: autoId({ source, model: m, project, prompt, references: resolved, aspectRatio, size, outPath }), bound: true, scoped: true });
@@ -204,6 +213,48 @@ export function earlierRecords(job, env, model) {
   return out;
 }
 
+/** Every record file in every journal folder, read: [{ file, record }] (record null when it cannot be read). */
+async function journalRecords(deps, root) {
+  const out = [];
+  for (const dir of JOURNAL_DIRS) {
+    let names;
+    try { names = await deps.fs.readdir(path.join(root, dir)); } catch (e) {
+      if (e.code === 'ENOENT') continue;
+      throw e;
+    }
+    for (const name of names.filter((n) => n.endsWith('.json')).sort()) {
+      const file = path.join(root, dir, name);
+      const record = await readRecord(deps, file);
+      if (record !== undefined) out.push({ file, record });
+    }
+  }
+  return out;
+}
+
+const MADE_BY = /^(?:OpenAI|KIE) (.+) on the user's key$/;
+
+/** The model a kept record names: its model field, the model in a completed record's madeBy, or codex; else undefined. */
+export function recordedModel(record) {
+  if (!record || typeof record !== 'object') return undefined;
+  if (typeof record.model === 'string' && record.model) return record.model;
+  const made = typeof record.result?.madeBy === 'string' ? record.result.madeBy.match(MADE_BY) : null;
+  if (made) return made[1];
+  if (record.provider === 'Codex CLI') return DEFAULT_MODELS.codex;
+  return undefined;
+}
+
+/**
+ * A kept record the lookup cannot rule out for a request without an operationId: one that cannot be read, or an
+ * automatic-id record in this project (or in none) that does not name its model. A record naming its model was
+ * checked under its own derived id; one with a given id, or from another project, is another operation.
+ */
+function unidentified({ record }, scope) {
+  if (!record || typeof record !== 'object' || typeof record.operationId !== 'string') return true;
+  if (!record.operationId.startsWith('auto-')) return false;
+  if (record.project !== undefined && record.project !== scope) return false;
+  return recordedModel(record) === undefined;
+}
+
 const stateOf = (saved) => (saved?.state ? ` (${saved.state}${saved.reason ? `: ${saved.reason}` : ''}${saved.taskId ? `, task ${saved.taskId}` : ''})` : saved?.taskId ? ` (accepted, task ${saved.taskId})` : '');
 
 /** The same request was already sent through another source: refuse, naming it. */
@@ -217,7 +268,7 @@ function sentElsewhere(saved, provider) {
  * on the same route is moved to it (the earlier files are kept); any other earlier record refuses the operation
  * without sending anything or using anything from it.
  */
-async function adoptEarlier(deps, { scope, operationId, fingerprint, legacy = [], earlier = [], provider, file }) {
+async function adoptEarlier(deps, { scope, operationId, model, fingerprint, legacy = [], earlier = [], provider, file }) {
   for (const entry of earlier) {
     const saved = await readRecord(deps, entry.file);
     if (saved === undefined) continue;
@@ -231,14 +282,28 @@ async function adoptEarlier(deps, { scope, operationId, fingerprint, legacy = []
       if (saved.provider && saved.provider !== provider) throw sentElsewhere(saved, provider);
       throw new Error(`Operation ${operationId} was already used for a different image request; nothing was sent. Use a new operationId for a new image.`);
     }
-    const moved = { ...saved, operationId, project: scope, fingerprint, movedFrom: path.basename(entry.file), movedAt: deps.now().toISOString() };
+    // The same request on the same route: made with this route's model, which the moved record keeps.
+    const moved = { ...saved, operationId, project: scope, model: saved.model || model, fingerprint, movedFrom: path.basename(entry.file), movedAt: deps.now().toISOString() };
     try {
       await deps.fs.writeFile(file, JSON.stringify(moved, null, 2), { flag: 'wx' });
     } catch (e) {
       if (e.code !== 'EEXIST') throw e; // another call moved it at the same moment
     }
-    return;
+    return true;
   }
+  return false;
+}
+
+/** Refuse a request without an operationId while a kept record that may be the same request cannot be identified. */
+function refuseUnidentified(journal, { scope, operationId, checked }) {
+  const left = journal.find((e) => !checked.has(e.file) && unidentified(e, scope));
+  if (!left) return;
+  const r = left.record;
+  const what = r && typeof r === 'object'
+    ? `was kept by an earlier version of this add-on${stateOf(r)}${r.reservedAt ? ` on ${r.reservedAt}` : ''} without the model it was made with`
+    : 'could not be read (another call may be writing it at this moment)';
+  const via = (r && r.provider) || 'image source';
+  throw new Error(`Operation ${operationId} was not sent: the record ${left.file} ${what}, so it may be this same request. Check your ${via} account. To make this image, pass an operationId (a new operation), or remove that record once you have checked it is not this image.`);
 }
 
 /**
@@ -252,10 +317,15 @@ export async function reserveOperation(deps, { job, model, fingerprint, legacy, 
   const operationId = operationIdFor(job);
   const scope = job.projectDir || null;
   const file = scopedFile(stateDir, scope, operationId);
-  const earlier = earlierRecords(job, deps.env, model).filter((e) => e.file !== file);
-  const record = { operationId, project: scope, provider, fingerprint, state: 'submitting', reservedAt: deps.now().toISOString() };
+  // A request without an operationId is looked up under every model a kept record names, so the journal is read first.
+  const journal = job.operationId ? [] : await journalRecords(deps, path.dirname(stateDir));
+  const earlier = earlierRecords(job, deps.env, model, journal.map((e) => recordedModel(e.record)).filter(Boolean)).filter((e) => e.file !== file);
+  const record = { operationId, project: scope, provider, model, fingerprint, state: 'submitting', reservedAt: deps.now().toISOString() };
   await deps.fs.mkdir(stateDir, { recursive: true });
-  if ((await readRecord(deps, file)) === undefined) await adoptEarlier(deps, { scope, operationId, fingerprint, legacy, earlier, provider, file });
+  if ((await readRecord(deps, file)) === undefined) {
+    const adopted = await adoptEarlier(deps, { scope, operationId, model, fingerprint, legacy, earlier, provider, file });
+    if (!adopted && !job.operationId) refuseUnidentified(journal, { scope, operationId, checked: new Set([file, ...earlier.map((e) => e.file)]) });
+  }
   try {
     await deps.fs.writeFile(file, JSON.stringify(record, null, 2), { flag: 'wx' });
     return { fresh: true, file, record, operationId, provider };
