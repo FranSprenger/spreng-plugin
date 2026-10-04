@@ -331,3 +331,17 @@ test('the real server answers initialize and tools/list over stdio', async () =>
   assert.equal(init.result.serverInfo.name, 'spreng-images');
   assert.deepEqual(list.result.tools.map((t) => t.name), TOOLS.map((t) => t.name));
 });
+
+// Model-facing wording (tool descriptions and the image-source skill) changes only with the owner's prior permission.
+// Pinned to the wording approved at 741f10e; a proposed change goes to the owner first, then these hashes move with it.
+test('model-facing wording: the spreng-images tool descriptions and the image-source skill are the approved text', async () => {
+  const { createHash } = await import('node:crypto');
+  const hash = (d) => createHash('sha256').update(d).digest('hex');
+  const make = TOOLS.find((t) => t.name === 'make_image');
+  assert.doesNotMatch(make.description, /whichever source/);
+  assert.doesNotMatch(make.inputSchema.properties.operationId.description, /switching source/);
+  const skill = await fs.readFile(path.join(ROOT, 'plugins/spreng-images/skills/image-source/SKILL.md'));
+  assert.doesNotMatch(String(skill), /also after switching source/);
+  assert.equal(hash(JSON.stringify(TOOLS)), 'd13b48330073719796d991142e5b437f34c1861fff7494a7b9938a317d8e87de', 'tool descriptions as approved at 741f10e');
+  assert.equal(hash(skill), 'a4ad922b755b1bf862595626807e0973cd1e5bbe30129c3c4c7f735af3c169a7', 'image-source skill as approved at 741f10e');
+});
