@@ -19,12 +19,13 @@ user picks once; the choice is remembered on this computer.
    the computer's secure storage). It is never typed into the chat or passed to a tool. Once it is set,
    the user restarts Claude Code so the add-on's server starts with it; `image_source_status` then shows
    the source as ready.
-3. Call `make_image` with the claim's `brief.renderPrompt` as `prompt` and its reference links as
-   `references`. It saves the file in the project and returns its path. For `other`, follow the `next`
-   text it returns.
+3. Call `make_image` with the claim's `brief.renderPrompt` as `prompt`, its reference links as
+   `references` and the claim id as `operationId`. It saves the file in the project and returns its path.
+   For `other`, follow the `next` text it returns.
 4. Carry on with Spreng's own steps, the same for every source: `create_native_image_upload`, PUT the
    file to the `signedUrl` it returns, then `finalize_native_image` with the prompt you used.
 
 `make_image` sends one request per image. When it reports an unclear outcome, tell the user and do not
-call it again for that image without their go-ahead. A KIE task that was still running is collected with
-`make_image` and its `kieTaskId`.
+call it again for that image without their go-ahead. A KIE task that KIE accepted but that was not
+collected (still running, or a status check failed) is saved on this computer; the same `make_image`
+request with the same `operationId` collects it without starting another task, as does `kieTaskId`.

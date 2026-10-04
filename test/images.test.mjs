@@ -86,7 +86,7 @@ test('codex route: references given as links are downloaded and attached with -i
     const made = path.join(env.CODEX_HOME, 'generated_images', 't', 'exec-1.png');
     await fs.mkdir(path.dirname(made), { recursive: true });
     await fs.writeFile(made, PNG);
-    return { code: 0, stdout: '', stderr: '' };
+    return { code: 0, stdout: '{"type":"thread.started","thread_id":"t"}\n', stderr: '' };
   };
   await callTool('make_image', { prompt: 'p', references: ['https://kkwbfbsokgefebizzkpt.supabase.co/storage/v1/ref.png'] }, deps);
   const ref = args[args.indexOf('-i') + 1];
@@ -97,8 +97,46 @@ test('codex route: references given as links are downloaded and attached with -i
 test('codex route: no new image is an error, not a silent success', async () => {
   const { deps } = await sandbox();
   await callTool('set_image_source', { source: 'codex' }, deps);
-  deps.run = async () => ({ code: 0, stdout: '', stderr: '' });
+  deps.run = async () => ({ code: 0, stdout: '{"type":"thread.started","thread_id":"thread-1"}\n', stderr: '' });
   await assert.rejects(callTool('make_image', { prompt: 'p' }, deps), /no new image/);
+});
+
+test('codex route: an image from a concurrent session is never taken when this thread made none', async () => {
+  const { deps, env } = await sandbox();
+  await callTool('set_image_source', { source: 'codex' }, deps);
+  const theirs = path.join(env.CODEX_HOME, 'generated_images', 'thread-other', 'exec-private.png');
+  deps.run = async () => {
+    // Another Codex session (another client) saves an image while this run is going; this run's thread makes none.
+    await fs.mkdir(path.dirname(theirs), { recursive: true });
+    await fs.writeFile(theirs, PNG);
+    return { code: 0, stdout: '{"type":"thread.started","thread_id":"thread-mine"}\n', stderr: '' };
+  };
+  await assert.rejects(callTool('make_image', { prompt: 'p', outPath: 'ads/mine.png' }, deps), /thread-mine/);
+  await assert.rejects(fs.access(path.join(env.CLAUDE_PROJECT_DIR, 'ads/mine.png')), 'nothing copied into the project');
+});
+
+test('codex route: a thread id that is only a substring of another folder does not match it', async () => {
+  const { deps, env } = await sandbox();
+  await callTool('set_image_source', { source: 'codex' }, deps);
+  deps.run = async () => {
+    const other = path.join(env.CODEX_HOME, 'generated_images', 'thread-42-other', 'exec.png');
+    await fs.mkdir(path.dirname(other), { recursive: true });
+    await fs.writeFile(other, PNG);
+    return { code: 0, stdout: '{"type":"thread.started","thread_id":"thread-42"}\n', stderr: '' };
+  };
+  await assert.rejects(callTool('make_image', { prompt: 'p' }, deps), /thread-42/);
+});
+
+test('codex route: without a thread id in the output nothing is picked', async () => {
+  const { deps, env } = await sandbox();
+  await callTool('set_image_source', { source: 'codex' }, deps);
+  deps.run = async () => {
+    const made = path.join(env.CODEX_HOME, 'generated_images', 'someone', 'exec.png');
+    await fs.mkdir(path.dirname(made), { recursive: true });
+    await fs.writeFile(made, PNG);
+    return { code: 0, stdout: '', stderr: '' };
+  };
+  await assert.rejects(callTool('make_image', { prompt: 'p' }, deps), /thread id/);
 });
 
 test('openai route: one generations call with the key and prompt; image written from b64_json', async () => {
@@ -181,6 +219,68 @@ test('kie route: a task id collects a running task without creating another', as
   await callTool('make_image', { prompt: 'p', kieTaskId: 'task_9' }, deps);
   assert.ok(!urls.some((u) => u.endsWith('/createTask')));
   assert.ok(urls[0].endsWith('taskId=task_9'));
+});
+
+test('kie route: a polling network error keeps the task id; the same call again resumes it with no second create', async () => {
+  const { deps, env } = await sandbox({ SPRENG_IMAGES_KIE_KEY: KIE_KEY });
+  await callTool('set_image_source', { source: 'kie' }, deps);
+  let creates = 0;
+  let pollFails = true;
+  const polled = [];
+  deps.fetch = async (url) => {
+    if (url.endsWith('/createTask')) { creates++; return res(200, { code: 200, data: { taskId: `task_${creates}` } }); }
+    if (url.includes('/recordInfo')) {
+      if (pollFails) throw new Error('socket hang up');
+      polled.push(url.split('taskId=')[1]);
+      return res(200, { data: { state: 'success', resultJson: { resultUrls: ['https://tempfile.example/o.png'] } } });
+    }
+    if (url === 'https://tempfile.example/o.png') return res(200, null);
+    throw new Error(url);
+  };
+  const args = { prompt: 'p', aspectRatio: '1:1' };
+  const first = await handle({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'make_image', arguments: args } }, deps);
+  assert.equal(first.result.isError, true);
+  assert.match(first.result.content[0].text, /task_1/, 'the error keeps the task id');
+  assert.match(first.result.content[0].text, /socket hang up/);
+  assert.equal(creates, 1);
+  const kept = await fs.readdir(path.join(env.CLAUDE_PLUGIN_DATA, 'kie-operations'));
+  assert.equal(kept.length, 1, 'the task id is on disk');
+  pollFails = false;
+  const out = await callTool('make_image', args, deps);
+  assert.equal(creates, 1, 'no second paid create');
+  assert.equal(out.taskId, 'task_1');
+  assert.equal(out.resumed, true);
+  assert.deepEqual(polled, ['task_1'], 'the resumed call polls the first task');
+  assert.deepEqual(await fs.readFile(out.path), PNG);
+  assert.deepEqual(await fs.readdir(path.join(env.CLAUDE_PLUGIN_DATA, 'kie-operations')), [], 'a finished operation is cleared');
+  await callTool('make_image', args, deps);
+  assert.equal(creates, 2, 'a new request after a finished one makes a new image');
+});
+
+test('kie route: an operationId names the operation; a different one starts its own task', async () => {
+  const { deps } = await sandbox({ SPRENG_IMAGES_KIE_KEY: KIE_KEY });
+  await callTool('set_image_source', { source: 'kie' }, deps);
+  let creates = 0;
+  deps.fetch = async (url) => {
+    if (url.endsWith('/createTask')) { creates++; return res(200, { code: 200, data: { taskId: `task_${creates}` } }); }
+    throw new Error('socket hang up');
+  };
+  await assert.rejects(callTool('make_image', { prompt: 'p', operationId: 'claim-a' }, deps), /task_1.*claim-a|claim-a.*task_1/);
+  await assert.rejects(callTool('make_image', { prompt: 'p', operationId: 'claim-a' }, deps), /task_1/);
+  assert.equal(creates, 1);
+  await assert.rejects(callTool('make_image', { prompt: 'p', operationId: 'claim-b' }, deps), /task_2/);
+  assert.equal(creates, 2);
+});
+
+test('kie route: a polling HTTP error answer is kept in the error with the task id', async () => {
+  const { deps } = await sandbox({ SPRENG_IMAGES_KIE_KEY: KIE_KEY });
+  await callTool('set_image_source', { source: 'kie' }, deps);
+  deps.fetch = async (url) => {
+    if (url.endsWith('/createTask')) return res(200, { code: 200, data: { taskId: 'task_7' } });
+    if (url.includes('/recordInfo')) return res(200, { data: { state: 'success', resultJson: { resultUrls: ['https://tempfile.example/o.png'] } } });
+    return res(500, null);
+  };
+  await assert.rejects(callTool('make_image', { prompt: 'p' }, deps), /task_7/);
 });
 
 test('kie input: reference field per documented model, refused for others', () => {

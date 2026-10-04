@@ -8,13 +8,16 @@
 //   openai  the user's own OpenAI key: POST https://api.openai.com/v1/images/generations (or /v1/images/edits
 //           with reference files), one image, b64_json written to outPath
 //   kie     the user's own KIE key: POST https://api.kie.ai/api/v1/jobs/createTask once, then
-//           GET /api/v1/jobs/recordInfo until success or fail, then the result file is downloaded to outPath
+//           GET /api/v1/jobs/recordInfo until success or fail, then the result file is downloaded to outPath.
+//           The accepted task id is saved on this computer (stateDir) under the request's operation id before
+//           the first status check, so the same request again collects that task instead of paying for another
 //   other   a source the user named: no call; the answer says what to do with the file once it exists
 //
 // A paid create is sent once. An unclear outcome (network error, timeout, 5xx) is reported, never retried, so the
 // user is never charged twice for one image.
 
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 
 export const SOURCES = ['codex', 'openai', 'kie', 'other'];
 export const OPENAI_BASE = 'https://api.openai.com';
@@ -87,12 +90,14 @@ export async function runCodex({ prompt, references = [], outPath, tmpDir }, dep
   await deps.fs.mkdir(tmpDir, { recursive: true });
   const { code, stdout, stderr } = await deps.run(deps.env.SPRENG_IMAGES_CODEX_BIN || 'codex', args, { timeoutMs: 10 * 60 * 1000 });
   if (code !== 0) throw new Error(`codex exec exited ${code}: ${String(stderr || '').trim().slice(-400) || 'no error text'}`);
-  // Prefer the image Codex filed under this run's thread id; else any new image in generated_images.
-  const thread = (String(stdout).match(/"thread_id"\s*:\s*"([^"]+)"/) || [])[1];
-  const after = (await listImages(imagesDir, deps.fs)).filter((f) => !before.has(f));
-  const mine = thread ? after.filter((f) => f.includes(thread)) : [];
-  const pick = (mine.length ? mine : after).sort().at(-1);
-  if (!pick) throw new Error('codex finished but no new image appeared in ' + imagesDir + ' (is the Codex CLI signed in with a ChatGPT plan that includes images?)');
+  // Only an image Codex filed under THIS run's thread (generated_images/<thread_id>/) is used. Other Codex
+  // sessions on this computer save into the same generated_images folder, so any other new image may belong
+  // to another session (another client) and is never taken.
+  const thread = (String(stdout).match(/"thread_id"\s*:\s*"([A-Za-z0-9_-]+)"/) || [])[1];
+  if (!thread) throw new Error('codex finished without a thread id in its output, so its image cannot be told apart from other Codex sessions; nothing was copied.');
+  const threadDir = path.join(imagesDir, thread);
+  const pick = (await listImages(threadDir, deps.fs)).filter((f) => !before.has(f)).sort().at(-1);
+  if (!pick) throw new Error(`codex thread ${thread} finished but no new image appeared in ${threadDir}; images from other Codex sessions are never used (is the Codex CLI signed in with a ChatGPT plan that includes images?)`);
   await deps.fs.mkdir(path.dirname(outPath), { recursive: true });
   await deps.fs.copyFile(pick, outPath);
   return { path: outPath, source: 'codex', madeBy: 'Codex CLI image tool', codexFile: pick };
@@ -138,13 +143,49 @@ export function kieInput(model, prompt, references, aspectRatio) {
   return input;
 }
 
-export async function runKie({ prompt, references = [], outPath, aspectRatio, kieTaskId }, deps, { key, model, pollMs = 5000, maxPolls = 120 }) {
+const sha = (text) => createHash('sha256').update(text).digest('hex');
+
+/** The operation id of a KIE request: the one given, else one derived from everything that defines the image. */
+export function kieOperationId({ operationId, model, prompt, references = [], aspectRatio, requestedOutPath }) {
+  if (operationId) return String(operationId);
+  return 'auto-' + sha(JSON.stringify({ model, prompt, references, aspectRatio: aspectRatio || null, outPath: requestedOutPath || null })).slice(0, 16);
+}
+
+export async function runKie(job, deps, { key, model, pollMs = 5000, maxPolls = 120 }) {
+  const { prompt, references = [], aspectRatio, kieTaskId, stateDir } = job;
   if (!key) throw new Error('No KIE key is set. Run /plugin configure spreng-images@spreng and enter it there (never in the chat).');
   const urls = references.filter((r) => /^https:\/\//i.test(r));
   if (urls.length !== references.length) throw new Error('KIE takes reference images as https links only.');
   const auth = { authorization: `Bearer ${key}` };
-  const taskId = kieTaskId || await kieCreate(model, prompt, urls, aspectRatio, auth, deps);
-  return kiePoll(taskId, outPath, model, auth, deps, { pollMs, maxPolls });
+  if (kieTaskId) return kiePoll(kieTaskId, job.outPath, model, auth, deps, { pollMs, maxPolls });
+
+  // The task id is kept on disk against the operation id from the moment KIE accepts the task until it is
+  // finished, so a lost status check never loses it and the same request again resumes it.
+  const operationId = kieOperationId({ ...job, model });
+  const record = path.join(stateDir, `${sha('op:' + operationId).slice(0, 32)}.json`);
+  let saved = null;
+  try { saved = JSON.parse(await deps.fs.readFile(record, 'utf8')); } catch { saved = null; }
+  const resumed = Boolean(saved?.taskId);
+  const taskId = resumed ? saved.taskId : await kieCreate(model, prompt, urls, aspectRatio, auth, deps);
+  const outPath = resumed && saved.outPath ? saved.outPath : job.outPath;
+  if (!resumed) {
+    try {
+      await deps.fs.mkdir(stateDir, { recursive: true });
+      await deps.fs.writeFile(record, JSON.stringify({ operationId, taskId, model, outPath, acceptedAt: deps.now().toISOString() }, null, 2));
+    } catch (e) {
+      throw new Error(`KIE accepted task ${taskId} but it could not be saved on this computer (${e.message}); call make_image with kieTaskId ${taskId} to collect it instead of asking again.`);
+    }
+  }
+  let out;
+  try {
+    out = await kiePoll(taskId, outPath, model, auth, deps, { pollMs, maxPolls });
+  } catch (e) {
+    if (e.kieFinished) await deps.fs.rm(record, { force: true });
+    else e.message += ` [KIE task ${taskId}, operation ${operationId}: the same make_image request again (or operationId ${operationId}) collects this task without creating another]`;
+    throw e;
+  }
+  await deps.fs.rm(record, { force: true });
+  return { ...out, operationId, resumed };
 }
 
 async function kieCreate(model, prompt, urls, aspectRatio, auth, deps) {
@@ -166,19 +207,31 @@ async function kieCreate(model, prompt, urls, aspectRatio, auth, deps) {
   return taskId;
 }
 
+/** An error after which the task is over on KIE's side, so there is nothing left to resume. */
+function finished(message) {
+  return Object.assign(new Error(message), { kieFinished: true });
+}
+
 async function kiePoll(taskId, outPath, model, auth, deps, { pollMs, maxPolls }) {
   for (let i = 0; i < maxPolls; i++) {
     await deps.sleep(pollMs);
-    const p = await deps.fetch(`${KIE_BASE}/api/v1/jobs/recordInfo?taskId=${encodeURIComponent(taskId)}`, { headers: auth });
+    let p;
+    try {
+      p = await deps.fetch(`${KIE_BASE}/api/v1/jobs/recordInfo?taskId=${encodeURIComponent(taskId)}`, { headers: auth });
+    } catch (e) {
+      throw new Error(`KIE status check for task ${taskId} failed (${e.message}).`);
+    }
     if (!p.ok) continue;
-    const info = (await p.json())?.data || {};
-    if (info.state === 'fail') throw new Error(`KIE task ${taskId} failed: ${info.failMsg || 'no reason given'}`);
+    let info;
+    try { info = (await p.json())?.data || {}; } catch (e) { throw new Error(`KIE status for task ${taskId} could not be read (${e.message}).`); }
+    if (info.state === 'fail') throw finished(`KIE task ${taskId} failed: ${info.failMsg || 'no reason given'}`);
     if (info.state !== 'success') continue;
     let result = info.resultJson;
     if (typeof result === 'string') { try { result = JSON.parse(result); } catch { result = {}; } }
     const url = result?.resultUrls?.[0];
-    if (!url) throw new Error(`KIE task ${taskId} succeeded without a result link.`);
-    const f = await deps.fetch(url);
+    if (!url) throw finished(`KIE task ${taskId} succeeded without a result link.`);
+    let f;
+    try { f = await deps.fetch(url); } catch (e) { throw new Error(`KIE result for task ${taskId} could not be downloaded (${e.message}).`); }
     if (!f.ok) throw new Error(`KIE result for task ${taskId} could not be downloaded: HTTP ${f.status}`);
     await deps.fs.mkdir(path.dirname(outPath), { recursive: true });
     await deps.fs.writeFile(outPath, Buffer.from(await f.arrayBuffer()));

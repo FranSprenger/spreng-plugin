@@ -93,6 +93,7 @@ export const TOOLS = [
         aspectRatio: { type: 'string', description: 'For KIE, such as 1:1 or 9:16.' },
         size: { type: 'string', description: 'For OpenAI, such as 1024x1024 or auto.' },
         kieTaskId: { type: 'string', description: 'Collect a KIE task that was still running, instead of starting a new one.' },
+        operationId: { type: 'string', description: 'For KIE: names this image request, such as the Spreng claim id. A KIE task that was accepted but not yet collected is resumed when the same request (or the same operationId) comes again, so no second task is paid for.' },
       },
       required: ['prompt'],
       additionalProperties: false,
@@ -132,7 +133,10 @@ export async function callTool(name, args = {}, deps = defaultDeps()) {
     const stamp = deps.now().toISOString().replace(/[:.]/g, '-');
     const outPath = path.resolve(projectDir(env), args.outPath || path.join('spreng-images', `${stamp}.png`));
     const tmpDir = path.join(dataDir(env), 'work', stamp);
-    const job = { prompt: args.prompt, references: args.references || [], outPath, tmpDir, size: args.size, aspectRatio: args.aspectRatio, kieTaskId: args.kieTaskId };
+    const job = {
+      prompt: args.prompt, references: args.references || [], outPath, tmpDir, size: args.size, aspectRatio: args.aspectRatio,
+      kieTaskId: args.kieTaskId, operationId: args.operationId, requestedOutPath: args.outPath, stateDir: path.join(dataDir(env), 'kie-operations'),
+    };
     if (choice.source === 'codex') return runCodex(job, deps);
     if (choice.source === 'openai') return runOpenAI(job, deps, { key: secret(env.SPRENG_IMAGES_OPENAI_KEY), model: secret(env.SPRENG_IMAGES_OPENAI_MODEL) || 'gpt-image-2' });
     if (choice.source === 'kie') return runKie(job, deps, { key: secret(env.SPRENG_IMAGES_KIE_KEY), model: secret(env.SPRENG_IMAGES_KIE_MODEL) || 'nano-banana-pro' });

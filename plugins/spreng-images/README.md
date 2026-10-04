@@ -22,9 +22,9 @@ written into a file by this add-on, never sent to Spreng and never shown in a to
 
 | Source | What runs or is sent | Destination |
 |---|---|---|
-| codex | Runs your own `codex` program (`codex exec`, read-only sandbox) with the prompt and reference images; copies the new image from `~/.codex/generated_images/` into your project | OpenAI, through your Codex sign-in |
+| codex | Runs your own `codex` program (`codex exec`, read-only sandbox) with the prompt and reference images; copies the image that run's own Codex thread saved in `~/.codex/generated_images/<thread>/` into your project (an image from any other Codex session is never used) | OpenAI, through your Codex sign-in |
 | openai | One request per image with your key, the prompt and any reference images | `https://api.openai.com/v1/images/generations` or `/v1/images/edits` |
-| kie | One task per image with your key, the prompt and reference links, then status checks and the result download | `https://api.kie.ai/api/v1/jobs/createTask` and `/api/v1/jobs/recordInfo`, then the result link KIE returns |
+| kie | One task per image with your key, the prompt and reference links, then status checks and the result download; the accepted task id is kept on this computer until it is collected, so asking again resumes it instead of paying twice | `https://api.kie.ai/api/v1/jobs/createTask` and `/api/v1/jobs/recordInfo`, then the result link KIE returns |
 | other | Nothing | none |
 
 Reference images given as links are downloaded first (from the links Spreng's claim returns). Files it
