@@ -2,7 +2,7 @@
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "spreng",
   "version": "0.1.0",
-  "description": "Connects your Spreng account: Spreng prepares research reads, angles and ad image plans from your saved offer, your own assistant writes the text and makes the images with its own tools, and Spreng saves the results to your account.",
+  "description": "Connects your Spreng account: Spreng prepares research reads, angles and ad image plans from your saved offer, your own assistant writes the text and makes the images with its own tools, and Spreng saves your research, angles and plans.",
   "author": {
     "name": "Fran Sprenger",
     "url": "https://spreng.io"
@@ -10,16 +10,26 @@
   "homepage": "https://spreng.io",
   "repository": "https://github.com/FranSprenger/spreng-plugin",
   "license": "MIT",
-  "keywords": ["ads", "advertising", "research", "angles", "marketing"],
+  "keywords": [
+    "ads",
+    "advertising",
+    "research",
+    "angles",
+    "marketing"
+  ],
   "extensions": {
     "com.openai": {
       "interface": {
         "displayName": "Spreng",
         "shortDescription": "Plan and save ads from offers",
-        "longDescription": "Spreng connects your assistant to your Spreng account so it can turn a saved offer into ad angles and ad images. Spreng stores each client's offer, research, angles and Prompt Plates. When you ask for ads, Spreng prepares a plan from what you saved: the plate, the angle and the reference files for each image. Your assistant makes each image with its own image tool, and Spreng saves the result to your account. You can also ask for a research read or new angles from saved research: Spreng prepares each step, your assistant writes the answer, and Spreng saves it. Spreng does not generate images itself, run ads or spend money on ad platforms. You need a Spreng account and sign in once when you connect.",
+        "longDescription": "Spreng connects your assistant to your Spreng account so it can turn a saved offer into ad angles and ad images. Spreng stores each client's offer, research, angles and Prompt Plates. When you ask for ads, Spreng prepares a plan from what you saved: the plate, the angle and the reference files for each image. Your assistant makes each image with its own image tool. You can also ask for a research read or new angles from saved research: Spreng prepares each step, your assistant writes the answer, and Spreng saves it to your account. Spreng does not generate images itself, run ads or spend money on ad platforms. You need a Spreng account and sign in once when you connect.",
         "developerName": "Fran Sprenger",
         "category": "Productivity",
-        "capabilities": ["Read saved offers and research", "Prepare ad image plans", "Save images, research and angles"],
+        "capabilities": [
+          "Read saved offers and research",
+          "Prepare ad image plans",
+          "Save research, angles and plans"
+        ],
         "websiteURL": "https://spreng.io",
         "supportURL": "https://spreng.io/support",
         "privacyPolicyURL": "https://spreng.io/privacy",
@@ -47,13 +57,13 @@
               "description": "Make ad images from saved research",
               "prompt": "Make two ads for Mossgate Pottery from my saved Spreng research.",
               "tools_triggered": "list_clients, get_client, prepare_prompt_plate_ads, claim_native_image, create_native_image_upload, finalize_native_image",
-              "expected_behavior": "Prepares a saved plan for Mossgate Pottery, makes each image with the host's own image tool from the plan, uploads it and saves it; replies with the saved images and does not run new research."
+              "expected_behavior": "Prepares a saved plan for Mossgate Pottery, makes each image with the host's own image tool from the plan's prompt and reference files, and completes the connector's upload and finalize steps for each image; does not run new research."
             },
             {
               "description": "Use a Prompt Plate the user names",
               "prompt": "Find a before and after Prompt Plate in Spreng and use it for one Mossgate Pottery ad.",
               "tools_triggered": "search_prompt_plates, get_prompt_plate, prepare_prompt_plate_ads, claim_native_image, create_native_image_upload, finalize_native_image",
-              "expected_behavior": "Shows the matching plates, uses the one the user picks for a one-image plan, makes and saves that image."
+              "expected_behavior": "Shows the matching plates, uses the one the user picks for a one-image plan, and makes that image with the host's own image tool."
             },
             {
               "description": "Write angles from saved research",
@@ -62,10 +72,10 @@
               "expected_behavior": "Prepares an angles run from the saved research, writes each unit's answer, submits it and publishes the angles to the client's saved angles; reports how many were saved."
             },
             {
-              "description": "Find images saved earlier",
-              "prompt": "Show me the Spreng ad images I saved for Mossgate Pottery.",
-              "tools_triggered": "list_clients, get_saved_images",
-              "expected_behavior": "Lists the images saved for Mossgate Pottery in the test account with their links, newest first."
+              "description": "Read the angles saved for a client",
+              "prompt": "What angles do I have saved for Mossgate Pottery in Spreng?",
+              "tools_triggered": "list_clients, get_client",
+              "expected_behavior": "Lists the angles saved for Mossgate Pottery in the test account and offers to make ads from them; does not write new angles unless asked."
             }
           ],
           "negative": [

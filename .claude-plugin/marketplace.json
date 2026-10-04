@@ -9,7 +9,7 @@
     {
       "name": "spreng",
       "source": "./plugins/spreng",
-      "description": "Connects your Spreng account: Spreng prepares research reads, angles and ad image plans, your own assistant writes and makes the images, and Spreng saves the results."
+      "description": "Connects your Spreng account: Spreng prepares research reads, angles and ad image plans, your own assistant writes the text and makes the images, and Spreng saves your research, angles and plans."
     },
     {
       "name": "spreng-images",

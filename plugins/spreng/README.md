@@ -3,9 +3,9 @@
 Spreng connects your assistant (Claude Code, Codex, claude.ai or ChatGPT) to your Spreng account. Your
 account keeps each client's offer, saved research, angles and Prompt Plates. When you ask for ads, Spreng
 prepares a plan from what you saved: the plate, the angle and the reference files for each image. Your
-assistant makes each image with its own image tool and Spreng saves the result to your account. You can
-also ask for a research read or new angles from saved research: Spreng prepares each step, your assistant
-writes the answer, and Spreng saves it.
+assistant makes each image with its own image tool. You can also ask for a research read or new angles
+from saved research: Spreng prepares each step, your assistant writes the answer, and Spreng saves it to
+your account.
 
 Spreng does not make images itself, does not run or pay for ads, and this plugin contains no scripts.
 
@@ -50,7 +50,7 @@ this plugin.
 |---|---|---|
 | `https://app.spreng.io/mcp` | Each tool call: the client and run ids, the text answers your assistant writes for a research read or angles, the prompt each image was made from, and image details | Every time your assistant uses a Spreng tool |
 | `https://app.spreng.io` (browser) and Spreng's sign-in service `https://kkwbfbsokgefebizzkpt.supabase.co/auth/v1` | Your sign-in | When you connect |
-| Spreng's file storage, `https://kkwbfbsokgefebizzkpt.supabase.co/storage/v1/...` | Each image file your assistant made, sent to the one-time upload link the connector returns; reference images are read from links the connector returns | When an ad image is saved |
+| Spreng's file storage, `https://kkwbfbsokgefebizzkpt.supabase.co/storage/v1/...` | Reference images are read from links the connector returns. When the connector's steps include an upload, the finished image goes to the one-time upload link it returns | When an ad image is made |
 
 Nothing else. The plugin reads no files on your computer beyond the images your assistant made for the
 run, collects no keys and runs no programs.
