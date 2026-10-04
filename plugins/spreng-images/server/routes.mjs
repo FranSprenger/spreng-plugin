@@ -19,7 +19,7 @@
 
 import path from 'node:path';
 import {
-  operationIdFor, fingerprintOf, requestFingerprint, reserveOperation, updateOperation, releaseOperation, markUncertain, markFailed,
+  operationIdFor, fingerprintOf, requestFingerprint, legacyFingerprints, snapshotReferences, reserveOperation, updateOperation, releaseOperation, markUncertain, markFailed,
   completeOperation, replayOperation,
 } from './operations.mjs';
 
@@ -39,7 +39,10 @@ function mimeOf(file) {
   return ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
 }
 
-/** Reference files as local paths: URLs are downloaded into tmpDir first (Codex and the OpenAI edit take files). */
+/**
+ * Reference files as local paths: URLs are downloaded into tmpDir first (Codex and the OpenAI edit take files).
+ * Local references arrive here already copied into tmpDir by snapshotReferences.
+ */
 async function localRefs(refs = [], tmpDir, deps) {
   const out = [];
   for (const [i, ref] of refs.entries()) {
@@ -84,11 +87,13 @@ export function codexTask(prompt) {
 }
 
 export async function runCodex(job, deps) {
-  const { prompt, references = [], tmpDir, stateDir } = job;
+  const { prompt, tmpDir, stateDir } = job;
+  const snap = await snapshotReferences(deps, job.references, tmpDir);
   const op = await reserveOperation(deps, stateDir, {
     project: job.projectDir,
     operationId: operationIdFor(job, 'codex', 'codex'),
-    fingerprint: await requestFingerprint(deps, job, { source: 'codex' }),
+    fingerprint: requestFingerprint(job, { source: 'codex' }, snap.hashes),
+    legacy: legacyFingerprints(job, (references) => ({ source: 'codex', prompt, references })),
     provider: 'Codex CLI',
   });
   if (!op.fresh) return replayOperation(deps, op);
@@ -98,7 +103,7 @@ export async function runCodex(job, deps) {
   let args;
   try {
     before = new Set(await listImages(imagesDir, deps.fs));
-    const refs = await localRefs(references, tmpDir, deps);
+    const refs = await localRefs(snap.refs, tmpDir, deps);
     args = ['exec', '--skip-git-repo-check', '--sandbox', 'read-only', '--json', '-C', tmpDir];
     for (const r of refs) args.push('-i', r);
     args.push(codexTask(prompt));
@@ -145,12 +150,14 @@ export async function runCodex(job, deps) {
 const refused = (status) => status >= 400 && status < 500 && status !== 408;
 
 export async function runOpenAI(job, deps, { key, model }) {
-  const { prompt, references = [], tmpDir, size, stateDir } = job;
+  const { prompt, tmpDir, size, stateDir } = job;
   if (!key) throw new Error('No OpenAI key is set. Run /plugin configure spreng-images@spreng and enter it there (never in the chat).');
+  const snap = await snapshotReferences(deps, job.references, tmpDir);
   const op = await reserveOperation(deps, stateDir, {
     project: job.projectDir,
     operationId: operationIdFor(job, 'openai', model),
-    fingerprint: await requestFingerprint(deps, job, { source: 'openai', model, size: size || null }),
+    fingerprint: requestFingerprint(job, { source: 'openai', model, size: size || null }, snap.hashes),
+    legacy: legacyFingerprints(job, (references) => ({ source: 'openai', model, prompt, references, size: size || null })),
     provider: 'OpenAI',
   });
   if (!op.fresh) return replayOperation(deps, op);
@@ -158,7 +165,7 @@ export async function runOpenAI(job, deps, { key, model }) {
   const auth = { authorization: `Bearer ${key}` };
   let request;
   try {
-    const refs = await localRefs(references, tmpDir, deps);
+    const refs = await localRefs(snap.refs, tmpDir, deps);
     if (refs.length) {
       const form = new FormData();
       form.append('model', model);
@@ -222,7 +229,9 @@ export async function runKie(job, deps, { key, model, pollMs = 5000, maxPolls = 
   const op = await reserveOperation(deps, stateDir, {
     project: job.projectDir,
     operationId: operationIdFor(job, 'kie', model),
-    fingerprint: await requestFingerprint(deps, job, { source: 'kie', model, aspectRatio: aspectRatio || null }),
+    // KIE takes links only (checked above), so each reference is hashed as its link and nothing local is read.
+    fingerprint: requestFingerprint(job, { source: 'kie', model, aspectRatio: aspectRatio || null }, (await snapshotReferences(deps, urls, job.tmpDir)).hashes),
+    legacy: legacyFingerprints(job, (references) => ({ source: 'kie', model, prompt, references, aspectRatio: aspectRatio || null })),
     provider: 'KIE',
   });
   let taskId;
@@ -267,6 +276,7 @@ async function collectKie(job, deps, { auth, model, pollMs, maxPolls }) {
     project: job.projectDir,
     operationId: `kie-task-${kieTaskId}`,
     fingerprint: fingerprintOf({ source: 'kie', collect: String(kieTaskId), project: job.projectDir || null }),
+    legacy: [fingerprintOf({ source: 'kie', collect: String(kieTaskId) })],
     provider: 'KIE',
   });
   if (!op.fresh) return replayOperation(deps, op);

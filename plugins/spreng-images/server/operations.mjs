@@ -22,6 +22,15 @@
 // and the fingerprint holds the project, the prompt and a hash of each reference (the content of a local file, the
 // link itself for a URL). The same operation id in another project is that project's own operation, so one
 // project never receives another project's kept image.
+//
+// A local reference is read once: its bytes are copied into the request's own work folder and hashed, and the
+// provider gets that copy, so what is sent is always what was fingerprinted, even if the project file changes
+// while the request runs.
+//
+// Records from the earlier journal (one file per operation id, no project) are checked before a new record is
+// made, so upgrading never sends an operation again. Such a record moves to this project only when it shows it
+// belongs here (its outPath is inside this project); otherwise the operation is refused, nothing is sent and
+// nothing from that record is used.
 
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -45,23 +54,54 @@ export function fingerprintOf(request) {
   return sha(JSON.stringify(request));
 }
 
-/** One hash per reference: the content of a local file (read now, before anything is sent), or the link itself. */
-export async function referenceHashes(deps, references = []) {
-  const out = [];
+const isUrl = (ref) => /^https?:\/\//i.test(ref);
+
+/** A path with every existing folder resolved through symlinks (the part not there yet is kept as given). */
+export async function canonicalPath(fs, p) {
+  let head = path.resolve(p);
+  const tail = [];
+  for (;;) {
+    try { return path.join(await fs.realpath(head), ...tail); } catch { /* not there yet */ }
+    const parent = path.dirname(head);
+    if (parent === head) return path.resolve(p);
+    tail.unshift(path.basename(head));
+    head = parent;
+  }
+}
+
+/**
+ * Read each local reference once, copy those bytes into the request's own work folder (keeping the file name) and
+ * hash them; a link is hashed as the link. Returns the references to hand the provider and their hashes, so the
+ * provider always gets the bytes that were fingerprinted.
+ */
+export async function snapshotReferences(deps, references = [], workDir) {
+  const refs = [];
+  const hashes = [];
   for (const [i, ref] of references.entries()) {
-    if (/^https?:\/\//i.test(ref)) { out.push(sha('url:' + ref)); continue; }
+    if (isUrl(ref)) { refs.push(ref); hashes.push(sha('url:' + ref)); continue; }
     let data;
     try { data = await deps.fs.readFile(ref); } catch (e) { throw new Error(`reference ${i + 1} (${ref}) could not be read: ${e.message}; nothing was sent.`); }
-    out.push(sha(data));
+    const copy = path.join(workDir, `local-${i + 1}`, path.basename(ref));
+    await deps.fs.mkdir(path.dirname(copy), { recursive: true });
+    await deps.fs.writeFile(copy, data, { flag: 'wx' });
+    refs.push(copy);
+    hashes.push(sha(data));
   }
-  return out;
+  return { refs, hashes };
 }
 
 /** The fingerprint of a request in a project: the project, the prompt, the reference hashes and the route's fields. */
-export async function requestFingerprint(deps, job, fields) {
-  return fingerprintOf({
-    ...fields, project: job.projectDir || null, prompt: job.prompt, references: await referenceHashes(deps, job.references),
-  });
+export function requestFingerprint(job, fields, referenceHashes) {
+  return fingerprintOf({ ...fields, project: job.projectDir || null, prompt: job.prompt, references: referenceHashes });
+}
+
+/**
+ * The fingerprints the earlier journal gave the same request (fields in its order, references as the paths or links
+ * it was given: resolved against the project, or as typed before that), to recognise its records.
+ */
+export function legacyFingerprints(job, fieldsFor) {
+  const forms = [job.references || [], job.typedReferences || job.references || []];
+  return [...new Set(forms.map((references) => fingerprintOf(fieldsFor(references))))];
 }
 
 async function writeAtomic(deps, file, data) {
@@ -70,23 +110,62 @@ async function writeAtomic(deps, file, data) {
   await deps.fs.rename(tmp, file);
 }
 
+async function readRecord(deps, file) {
+  try { return JSON.parse(await deps.fs.readFile(file, 'utf8')); } catch (e) {
+    if (e.code === 'ENOENT') return undefined;
+    return null; // there, but not readable (being written)
+  }
+}
+
+/** True when an earlier record shows it belongs to this project: its image was saved inside the project folder. */
+async function belongsTo(deps, record, scope) {
+  if (!scope || typeof record?.outPath !== 'string') return false;
+  const rel = path.relative(scope, await canonicalPath(deps.fs, record.outPath));
+  return Boolean(rel) && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
+/**
+ * Check the earlier journal (one record per operation id, no project) before a new record is made. A record that
+ * belongs to this project is moved to it (the earlier files are kept, so another project stays refused); any other
+ * earlier record refuses the operation without sending anything or using anything from it.
+ */
+async function adoptLegacy(deps, stateDir, { scope, operationId, fingerprint, legacy = [], provider, file }) {
+  const legacyFile = path.join(stateDir, `${sha('op:' + operationId).slice(0, 32)}.json`);
+  const saved = await readRecord(deps, legacyFile);
+  if (saved === undefined) return;
+  const via = saved?.provider || provider;
+  if (!saved || !(await belongsTo(deps, saved, scope))) {
+    const state = saved?.state ? ` (${saved.state}${saved.reason ? `: ${saved.reason}` : ''})` : '';
+    throw new Error(`Operation ${operationId} has a record from an earlier version of this add-on${state} that does not show it belongs to this project; nothing was sent and nothing from that record was used. Check your ${via} account; for a new image use a new operationId.`);
+  }
+  if (!legacy.includes(saved.fingerprint)) {
+    throw new Error(`Operation ${operationId} was already used for a different image request; nothing was sent. Use a new operationId for a new image.`);
+  }
+  const moved = { ...saved, project: scope, fingerprint, movedFrom: path.basename(legacyFile), movedAt: deps.now().toISOString() };
+  try {
+    await deps.fs.writeFile(file, JSON.stringify(moved, null, 2), { flag: 'wx' });
+  } catch (e) {
+    if (e.code !== 'EEXIST') throw e; // another call moved it at the same moment
+  }
+}
+
 /**
  * Reserve an operation before the paid call. Returns { fresh: true } when this call owns it, or { fresh: false }
- * with the kept record when the operation already exists.
+ * with the kept record when the operation already exists (in this project, or moved here from the earlier journal).
  */
-export async function reserveOperation(deps, stateDir, { project, operationId, fingerprint, provider }) {
+export async function reserveOperation(deps, stateDir, { project, operationId, fingerprint, legacy, provider }) {
   const scope = project || null;
   const file = path.join(stateDir, `${sha(JSON.stringify(['op', scope, operationId])).slice(0, 32)}.json`);
   const record = { operationId, project: scope, provider, fingerprint, state: 'submitting', reservedAt: deps.now().toISOString() };
   await deps.fs.mkdir(stateDir, { recursive: true });
+  if ((await readRecord(deps, file)) === undefined) await adoptLegacy(deps, stateDir, { scope, operationId, fingerprint, legacy, provider, file });
   try {
     await deps.fs.writeFile(file, JSON.stringify(record, null, 2), { flag: 'wx' });
     return { fresh: true, file, record, operationId, provider };
   } catch (e) {
     if (e.code !== 'EEXIST') throw e;
   }
-  let saved = null;
-  try { saved = JSON.parse(await deps.fs.readFile(file, 'utf8')); } catch { saved = null; }
+  const saved = await readRecord(deps, file);
   if (!saved) {
     throw new Error(`Operation ${operationId} is in progress in another call (its record is being written); it was not sent again.`);
   }

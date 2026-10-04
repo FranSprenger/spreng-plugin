@@ -12,6 +12,7 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { SOURCES, secret, runCodex, runOpenAI, runKie, runOther } from './routes.mjs';
+import { canonicalPath } from './operations.mjs';
 
 /** Run a program without a shell; resolves with its exit code and output. */
 export function runProcess(cmd, args, { timeoutMs } = {}) {
@@ -46,19 +47,6 @@ function dataDir(env) {
 }
 function projectDir(env) {
   return secret(env.CLAUDE_PROJECT_DIR) || process.cwd();
-}
-
-/** A folder's real path, stable before and after it exists: the nearest existing parent is resolved, the rest kept. */
-async function canonicalDir(fs, dir) {
-  let head = path.resolve(dir);
-  const tail = [];
-  for (;;) {
-    try { return path.join(await fs.realpath(head), ...tail); } catch { /* not there yet */ }
-    const parent = path.dirname(head);
-    if (parent === head) return path.resolve(dir);
-    tail.unshift(path.basename(head));
-    head = parent;
-  }
 }
 
 async function onPath(cmd, env, deps) {
@@ -150,7 +138,7 @@ export async function callTool(name, args = {}, deps = defaultDeps()) {
     const unique = `${stamp}-${randomUUID().slice(0, 8)}`;
     // The canonical project folder: every operation is kept under this folder and its operation id (and the folder is
     // part of its fingerprint), so one project never receives another project's image from the shared journal.
-    const project = await canonicalDir(deps.fs, projectDir(env));
+    const project = await canonicalPath(deps.fs, projectDir(env));
     const outPath = path.resolve(projectDir(env), args.outPath || path.join('spreng-images', `${unique}.png`));
     if (choice.source === 'other') return runOther({ otherName: choice.otherName, outPath });
     // Each request gets its own work folder (downloaded references, the Codex working folder), removed afterwards,
@@ -163,7 +151,7 @@ export async function callTool(name, args = {}, deps = defaultDeps()) {
     // the Codex work folder. Links stay as they are.
     const references = (args.references || []).map((r) => (/^https?:\/\//i.test(r) ? r : path.resolve(project, r)));
     const job = {
-      prompt: args.prompt, references, outPath, tmpDir, size: args.size, aspectRatio: args.aspectRatio,
+      prompt: args.prompt, references, typedReferences: args.references || [], outPath, tmpDir, size: args.size, aspectRatio: args.aspectRatio,
       kieTaskId: args.kieTaskId, operationId: args.operationId, requestedOutPath: args.outPath, projectDir: project, stateDir: path.join(dataDir(env), 'operations'),
     };
     try {

@@ -29,8 +29,9 @@ written into a file by this add-on, never sent to Spreng and never shown in a to
 
 Reference images given as links are downloaded first (from the links Spreng's claim returns). Files it
 writes: the image in your project (default `spreng-images/` in the project), your remembered choice in
-Claude Code's plugin data folder (`image-source.json`), downloaded references in a folder of their own
-for each request under `work/` there (removed when the request ends), and for the codex, openai and kie
+Claude Code's plugin data folder (`image-source.json`), downloaded references and a copy of each local
+reference file (what is sent is that copy) in a folder of their own for each request under `work/` there
+(removed when the request ends), and for the codex, openai and kie
 sources an `operations/` folder there with one record per image request (its state, the KIE task id, the
 image's SHA-256) and a copy of each image made, so one request never makes or pays for a second image. The
 file saved in your project is checked against that SHA-256 before it is reported.
