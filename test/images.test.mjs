@@ -298,7 +298,7 @@ test('other route: no call; says what to do next', async () => {
   await callTool('set_image_source', { source: 'other', otherName: 'my design tool' }, deps);
   const out = await callTool('make_image', { prompt: 'p' }, deps);
   assert.equal(out.source, 'other');
-  assert.match(out.next, /my design tool.*create_native_image_upload/);
+  assert.match(out.next, /my design tool.*finalize_native_image.*upload only when/);
 });
 
 test('a key never appears in a tool answer, even inside a provider error', async () => {
@@ -333,7 +333,7 @@ test('the real server answers initialize and tools/list over stdio', async () =>
 });
 
 // Model-facing wording (tool descriptions and the image-source skill) changes only with the owner's prior permission.
-// Pinned to the wording approved at 741f10e; a proposed change goes to the owner first, then these hashes move with it.
+// Pinned to 741f10e plus the owner-authorized receipt-only routing correction on 2026-10-05.
 test('model-facing wording: the spreng-images tool descriptions and the image-source skill are the approved text', async () => {
   const { createHash } = await import('node:crypto');
   const hash = (d) => createHash('sha256').update(d).digest('hex');
@@ -342,6 +342,6 @@ test('model-facing wording: the spreng-images tool descriptions and the image-so
   assert.doesNotMatch(make.inputSchema.properties.operationId.description, /switching source/);
   const skill = await fs.readFile(path.join(ROOT, 'plugins/spreng-images/skills/image-source/SKILL.md'));
   assert.doesNotMatch(String(skill), /also after switching source/);
-  assert.equal(hash(JSON.stringify(TOOLS)), 'd13b48330073719796d991142e5b437f34c1861fff7494a7b9938a317d8e87de', 'tool descriptions as approved at 741f10e');
-  assert.equal(hash(skill), 'a4ad922b755b1bf862595626807e0973cd1e5bbe30129c3c4c7f735af3c169a7', 'image-source skill as approved at 741f10e');
+  assert.equal(hash(JSON.stringify(TOOLS)), 'a06a23c8d4bc04687c6f37ad0e811598231e49a6d2fbebe6d4a82cb540ce6c84', 'tool descriptions with receipt-only routing approved 2026-10-05');
+  assert.equal(hash(skill), '03f213af9cd86f7a688691621cdb3b082025bcfa565b89a03ed516bbbb7127ff', 'image-source skill with receipt-only routing approved 2026-10-05');
 });

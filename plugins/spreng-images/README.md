@@ -3,8 +3,9 @@
 Claude Code has no image tool of its own. This add-on lets Claude Code make the images for a Spreng ad
 run through an image source you choose once and that this computer remembers: your Codex CLI signed in
 with your ChatGPT plan, your own OpenAI API key, your own KIE API key, or another source you name. After
-the image exists, the normal Spreng steps upload it to your Spreng account, the same as in Codex or
-ChatGPT. This add-on is separate from the Spreng plugin and is offered only through Spreng's own
+the image exists, follow Spreng's returned next step: record completion with the file kept here, or
+upload only when the served steps return a signed upload URL. Receipt-only accounts have no Gallery
+copy. This add-on is separate from the Spreng plugin and is offered only through Spreng's own
 marketplace.
 
 ## Install

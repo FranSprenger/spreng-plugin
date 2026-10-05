@@ -7,6 +7,16 @@ assistant makes each image with its own image tool. You can also ask for a resea
 from saved research: Spreng prepares each step, your assistant writes the answer, and Spreng saves it to
 your account.
 
+For accounts that keep no generated images, including the reviewer account, your assistant keeps the
+image files. Spreng records completion with `finalize_native_image`; there is no generated-image upload
+or Gallery copy. Earlier plans and completion status are available through `list_native_runs` and
+`get_native_run`. The assistant follows the account's served next step; it uploads a generated image
+only when that step provides a signed upload URL.
+
+`studio_start` returns the next setup step. You can update offer details and brand basics with
+`update_client`, or upload a logo or product photo with `create_brand_asset_upload`, then save the
+uploaded file with `save_brand_asset`. These brand inputs are separate from generated images.
+
 Spreng does not make images itself, does not run or pay for ads, and this plugin contains no scripts.
 
 ## What is in this plugin
@@ -48,12 +58,12 @@ this plugin.
 
 | Destination | What goes there | When |
 |---|---|---|
-| `https://app.spreng.io/mcp` | Each tool call: the client and run ids, the text answers your assistant writes for a research read or angles, the prompt each image was made from, and image details | Every time your assistant uses a Spreng tool |
+| `https://app.spreng.io/mcp` | Tool calls: client and run ids, offer and brand edits, text answers, and image completion details including the actual prompt and host. Receipt-only completion keeps the completion record, not the submitted prompt, host, model or references | Every time your assistant uses a Spreng tool |
 | `https://app.spreng.io` (browser) and Spreng's sign-in service `https://kkwbfbsokgefebizzkpt.supabase.co/auth/v1` | Your sign-in | When you connect |
-| Spreng's file storage, `https://kkwbfbsokgefebizzkpt.supabase.co/storage/v1/...` | Reference images are read from links the connector returns. When the connector's steps include an upload, the finished image goes to the one-time upload link it returns | When an ad image is made |
+| Spreng's file storage, `https://kkwbfbsokgefebizzkpt.supabase.co/storage/v1/...` | Reference images are read from returned links. User-supplied logos and product photos go to signed brand upload links. Generated images go to storage only when the served steps return a generated-image upload URL; the reviewer account has no such step | When reading references or following a served upload step |
 
-Nothing else. The plugin reads no files on your computer beyond the images your assistant made for the
-run, collects no keys and runs no programs.
+The assistant reads the reference files and any logo or product photo you ask it to upload. This plugin
+contains no file-reading code, collects no keys and runs no programs.
 
 ## Images by assistant
 

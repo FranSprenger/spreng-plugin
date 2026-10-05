@@ -80,6 +80,29 @@ test('the skill names only connector tools and carries no method text', () => {
   assert.ok(skill.split('\n').length < 80, 'router stays short');
 });
 
+test('image review cases use receipt completion without generated-image uploads', () => {
+  const cases = json(`${P}/plugin.json`).extensions['com.openai'].review.test_cases.positive;
+  const imageCases = cases.filter((c) => c.tools_triggered.includes('claim_native_image'));
+  assert.equal(imageCases.length, 2);
+  for (const c of imageCases) {
+    assert.ok(c.tools_triggered.includes('finalize_native_image'));
+    assert.ok(!c.tools_triggered.includes('create_native_image_upload'));
+    assert.match(c.expected_behavior, /image stays with the host|image with the host/);
+    assert.match(c.expected_behavior, /no upload or Gallery copy/);
+  }
+});
+
+test('both image routers follow served completion steps and preserve the host file', () => {
+  for (const file of [`${P}/skills/spreng/SKILL.md`, 'plugins/spreng-images/skills/image-source/SKILL.md']) {
+    const skill = read(file);
+    assert.match(skill, /claim's `next`/);
+    assert.match(skill, /only (?:if|when) it returns `signedUrl`/);
+    assert.match(skill, /`uploadNeeded: false`/);
+    assert.match(skill, /`assetId`, `actualPrompt` and `host`/);
+    assert.match(skill, /no Gallery copy|without a Gallery copy/);
+  }
+});
+
 test('listed text has no commerce wording, no em dashes and no key handling', () => {
   const texts = ['README.md', 'skills/spreng/SKILL.md', 'plugin.json', '.claude-plugin/plugin.json'].map((f) => [f, read(`${P}/${f}`)]);
   texts.push(['marketplace entry', JSON.stringify(json('.claude-plugin/marketplace.json').plugins.find((p) => p.name === 'spreng'))]);

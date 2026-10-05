@@ -1,6 +1,6 @@
 // routes.mjs: the four image sources of the spreng-images add-on. Each route makes ONE image from the prompt it
-// is given, unchanged, and writes the file to outPath. Nothing here talks to Spreng: the Spreng upload
-// (create_native_image_upload, PUT, finalize_native_image) stays the assistant's next step, the same whichever
+// is given, unchanged, and writes the file to outPath. Nothing here talks to Spreng: the assistant follows
+// the claim's next step (receipt or signed upload, then finalize_native_image), the same whichever
 // source made the file. Every outside call goes through deps (fetch, spawn, fs), so tests run with mocks.
 //
 //   codex   the user's own Codex CLI, signed in with their ChatGPT plan: `codex exec` with its built-in image
@@ -343,6 +343,6 @@ export function runOther({ otherName, outPath }) {
     path: outPath,
     source: 'other',
     madeBy: otherName || 'a source the user named',
-    next: `Make the image with ${otherName || 'that source'} from the prompt as given, save the file at ${outPath}, then continue with create_native_image_upload as usual.`,
+    next: `Make the image with ${otherName || 'that source'} from the prompt as given, save the file at ${outPath}, then follow the Spreng claim's next step: finalize_native_image records completion; upload only when the served steps return a signed upload URL.`,
   };
 }

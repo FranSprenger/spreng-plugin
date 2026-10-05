@@ -87,7 +87,7 @@ export const TOOLS = [
   {
     name: 'make_image',
     title: 'Make one image with the chosen source',
-    description: 'Makes one image from the prompt as given with the image source the user chose, and saves the file on this computer. Uses the user\'s own Codex plan or their own OpenAI or KIE account, which may cost them on that account. One operationId buys at most one image in each project: the same operationId again in that project returns what is kept instead of paying again, and an unclear outcome is reported, not retried. Then upload the file to Spreng with create_native_image_upload as usual.',
+    description: 'Makes one image from the prompt as given with the image source the user chose, and saves the file on this computer. Uses the user\'s own Codex plan or their own OpenAI or KIE account, which may cost them on that account. One operationId buys at most one image in each project: the same operationId again in that project returns what is kept instead of paying again, and an unclear outcome is reported, not retried. Then follow the Spreng claim’s next step: finalize_native_image records completion; upload only when the served steps return a signed upload URL.',
     inputSchema: {
       type: 'object',
       properties: {

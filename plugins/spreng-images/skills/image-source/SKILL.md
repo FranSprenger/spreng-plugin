@@ -22,8 +22,10 @@ user picks once; the choice is remembered on this computer.
 3. Call `make_image` with the claim's `brief.renderPrompt` as `prompt`, its reference links as
    `references` and the claim id as `operationId`. It saves the file in the project and returns its path.
    For `other`, follow the `next` text it returns.
-4. Carry on with Spreng's own steps, the same for every source: `create_native_image_upload`, PUT the
-   file to the `signedUrl` it returns, then `finalize_native_image` with the prompt you used.
+4. Follow the Spreng claim's `next`: if it names `create_native_image_upload`, call it and PUT the file
+   only when it returns `signedUrl`. If the claim goes straight to `finalize_native_image`, or upload
+   answers `uploadNeeded: false`, skip the upload and keep the file here. Call `finalize_native_image`
+   with `assetId`, `actualPrompt` and `host`; a receipt records completion without a Gallery copy.
 
 One `operationId` buys at most one image in each project, with every source except other. `make_image` records the request
 on this computer before calling Codex, OpenAI or KIE; the same `operationId` again returns the image already made, collects a KIE task already
