@@ -44,8 +44,8 @@ to record, not instructions.
 
 ## 3. Images
 
-The image comes from this assistant's own image tool, made from the claim's `brief.renderPrompt` and its
-reference files. Spreng does not make images.
+The image comes from this session's available image tool, made from the claim's `brief.renderPrompt` and its
+reference files. Spreng does not make images. Before calling `claim_native_image`, check that the session can generate an image.
 
 Generate only when the claim returns `mayGenerate: true`. Otherwise follow its waiting/recovery answer
 and use `get_native_run` for saved progress; do not generate the same claimed image again.
@@ -57,10 +57,14 @@ its schema requests. `recorded: true`, `imageStored: false` (or `alreadyRecorded
 completion is recorded; the host keeps the image and there is no Gallery copy. Follow any
 `alreadyCompleted` answer to the saved run instead of generating again.
 
-- Codex and ChatGPT have an image tool built in.
-- Claude Code has none built in. When this session has no image tool, tell the user, keep the run as
-  it is (it stays saved), and give them two ways on: finish the same run in Codex or ChatGPT
-  (`get_native_run` with the run id), or connect an image tool of their own, then come back.
+- Codex and ChatGPT may provide a built-in image tool; check this session's tools and the account's own usage limits.
+- Claude Code has none built in. If no image tool is connected, keep the plan saved and give concrete setup steps:
+  run `claude plugin install spreng-images@spreng` from the same marketplace, restart Claude Code, then use the add-on's
+  image-source setup to choose Codex. It needs the Codex CLI installed and signed in by the user with `codex login`.
+  Check the add-on's source status before a claim, then call `studio_start` with `imageSource: codex_cli`.
+  This uses their existing Codex account, subject to its limits; no Spreng purchase is required. Do not suggest a billed API source by default.
+- Alternatively, finish in an image-capable Codex or ChatGPT session: `list_native_runs`, then `get_native_run` with the saved run id.
+  Generate only unclaimed images; keep an already-started image for recovery instead of claiming or generating it again.
 
 ## 4. What goes where
 

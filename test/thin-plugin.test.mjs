@@ -103,6 +103,19 @@ test('both image routers follow served completion steps and preserve the host fi
   }
 });
 
+test('first-run image setup precedes claim and gives Claude Code a concrete Codex route', () => {
+  const skill = read(`${P}/skills/spreng/SKILL.md`);
+  assert.match(skill, /Before calling `claim_native_image`, check/);
+  assert.match(skill, /claude plugin install spreng-images@spreng/);
+  assert.match(skill, /choose Codex/);
+  assert.match(skill, /imageSource: codex_cli/);
+  assert.match(skill, /account's own usage limits/);
+  assert.match(skill, /list_native_runs/);
+  const source = read('plugins/spreng-images/skills/image-source/SKILL.md');
+  assert.match(source, /Do not offer a billed API source by default/);
+  assert.match(source, /Keep an existing source choice/);
+});
+
 test('listed text has no commerce wording, no em dashes and no key handling', () => {
   const texts = ['README.md', 'skills/spreng/SKILL.md', 'plugin.json', '.claude-plugin/plugin.json'].map((f) => [f, read(`${P}/${f}`)]);
   texts.push(['marketplace entry', JSON.stringify(json('.claude-plugin/marketplace.json').plugins.find((p) => p.name === 'spreng'))]);

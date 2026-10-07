@@ -8,6 +8,10 @@ description: Image step for Spreng in Claude Code. Use when a Spreng claim (clai
 Claude Code has no image tool of its own. The `spreng-images` tools make the image through a source the
 user picks once; the choice is remembered on this computer.
 
+For Spreng onboarding, guide the user to their existing Codex account first. Explain its usage limits.
+Do not offer a billed API source by default; the OpenAI and KIE setup below is for a user who explicitly
+asks to use their own source. Keep an existing source choice unless the user asks to change it.
+
 1. Call `image_source_status`. If `choice` is set, go to step 3.
 2. Ask the user once which source to use, and call `set_image_source` with it:
    - `codex`: their Codex CLI, signed in with their ChatGPT plan (`codex login`). Images come from Codex's

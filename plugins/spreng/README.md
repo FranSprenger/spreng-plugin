@@ -67,9 +67,12 @@ contains no file-reading code, collects no keys and runs no programs.
 
 ## Images by assistant
 
-Codex and ChatGPT have an image tool built in. Claude Code has none built in: without an image tool in
-the session, Spreng keeps the plan saved so you can finish it in Codex or ChatGPT, or connect an image
-tool of your own.
+Check that your current Codex or ChatGPT session has an image tool available. Your AI account's usage
+limits still apply. Claude Code has none built in. To use your existing Codex account from Claude Code,
+run `claude plugin install spreng-images@spreng`, restart Claude Code and choose Codex in the add-on's
+image-source setup. The Codex CLI must be installed and signed in by you with `codex login`. The assistant
+checks the image source before claiming an image. You can also keep the plan saved and finish it in an
+image-capable Codex or ChatGPT session using `list_native_runs` and `get_native_run`.
 
 ## Support
 
