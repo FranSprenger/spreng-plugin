@@ -51,6 +51,7 @@ export function operationIdFor(job) {
   return autoId({
     project: job.projectDir || null, prompt: job.prompt, references: job.references || [], aspectRatio: job.aspectRatio || null,
     size: job.size || null, outPath: job.requestedOutPath || null,
+    ...(job.requestedSize ? { requestedSize: job.requestedSize } : {}),
   });
 }
 
@@ -142,7 +143,7 @@ function sentElsewhere(saved, provider, model) {
  * one. A kept record of another request under the same id, or of the same request on another source or model, refuses
  * the call: nothing is sent.
  */
-export async function reserveOperation(deps, { job, model, fingerprint, provider }) {
+export async function reserveOperation(deps, { job, model, fingerprint, provider, legacyFingerprint }) {
   const operationId = operationIdFor(job);
   const project = job.projectDir || null;
   const file = recordFile(job.stateDir, project, operationId);
@@ -158,11 +159,13 @@ export async function reserveOperation(deps, { job, model, fingerprint, provider
   if (!saved) {
     throw new Error(`Operation ${operationId} is in progress in another call (its record is being written); it was not sent again.`);
   }
-  if (saved.fingerprint !== fingerprint) {
+  // Codex formerly ignored geometry. An exact old request can recover its original receipt, never submit again.
+  const legacy = saved.provider === provider && saved.model === model && saved.fingerprint === legacyFingerprint;
+  if (saved.fingerprint !== fingerprint && !legacy) {
     if (saved.provider !== provider || saved.model !== model) throw sentElsewhere(saved, provider, model);
     throw new Error(`Operation ${operationId} was already used for a different image request; nothing was sent. Use a new operationId for a new image.`);
   }
-  return { fresh: false, file, record: saved, operationId, provider };
+  return { fresh: false, file, record: saved, operationId, provider, legacy };
 }
 
 export async function updateOperation(deps, op, fields) {

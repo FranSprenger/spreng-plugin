@@ -38,6 +38,14 @@ task id, the image's SHA-256) and a copy of each image made, so one request neve
 file saved in your project is checked against that SHA-256 before it is reported.
 Images made with the openai or kie source are paid for on your own account with that provider.
 
+Pass the Spreng claim's `imageToolSettings.requestedSize` to `make_image`. On the Codex route, the
+creative prompt stays intact and the approved format-only sentence carries the requested shape to
+its prompt-only interface. The result returns the actual sent prompt and dimensions read from the
+returned image's header. A mismatch is reported with the saved file, never automatically regenerated.
+Header verification is not full pixel decoding and cannot guarantee what a model will render.
+This prompt/format receipt is stored locally with the image operation and survives retries; Spreng's
+free completion receipt still does not retain the image or prompt.
+
 For developers: only `operations-v1/` is read; record files that development builds left in other folders
 (such as `operations/` or `kie-operations/`) are not read.
 

@@ -9,6 +9,7 @@ import { spawn } from 'node:child_process';
 import { ROOT } from './helpers.mjs';
 import { callTool, handle, scrub, TOOLS } from '../plugins/spreng-images/server/server.mjs';
 import { codexTask, kieInput, secret } from '../plugins/spreng-images/server/routes.mjs';
+import { dimensionReceipt, formatPrompt, requestedFormat } from '../plugins/spreng-images/server/image-format.mjs';
 
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489', 'hex');
 const OPENAI_KEY = 'sk-test-openai-0000000000000000';
@@ -74,6 +75,101 @@ test('codex route: runs codex exec once with the prompt unchanged and copies the
   assert.equal(out.path, path.join(env.CLAUDE_PROJECT_DIR, 'ads/one.png'));
   assert.ok(out.codexFile.endsWith(path.join('thread-42', 'exec-new.png')));
   assert.deepEqual(await fs.readFile(out.path), PNG);
+});
+
+test('Codex receives requested shape, measures its returned header, and replays without regeneration', async () => {
+  for (const [requestedSize, width, height] of [['square', 1024, 1024], ['portrait', 800, 1000], ['story', 900, 1600], ['landscape', 1600, 900]]) {
+    const { deps, env } = await sandbox();
+    await callTool('set_image_source', { source: 'codex' }, deps);
+    let submissions = 0;
+    const prompt = 'Original creative\nexact headline';
+    const suffix = `REQUESTED FORMAT: ${requestedSize}. Verify the resulting dimensions; report a mismatch without silently regenerating.`;
+    const actualPrompt = `${prompt}\n\n${suffix}`;
+    deps.run = async (_cmd, args) => {
+      submissions++;
+      assert.ok(args.at(-1).includes(`<<<SPRENG_PROMPT\n${actualPrompt}\nSPRENG_PROMPT>>>`));
+      const made = path.join(env.CODEX_HOME, 'generated_images', 'geometry', 'exec.png');
+      const bytes = Buffer.from(PNG);
+      bytes.writeUInt32BE(width, 16); bytes.writeUInt32BE(height, 20);
+      await fs.mkdir(path.dirname(made), { recursive: true }); await fs.writeFile(made, bytes);
+      return { code: 0, stdout: '{"thread_id":"geometry"}\n', stderr: '' };
+    };
+    const args = { prompt, requestedSize, operationId: `format-${requestedSize}` };
+    const out = await callTool('make_image', args, deps);
+    assert.equal(out.actualPrompt, actualPrompt);
+    assert.equal(out.originalPrompt, prompt);
+    assert.deepEqual(out.dimensions, { width, height });
+    assert.equal(out.dimensionCheck.status, 'matches');
+    assert.equal(out.dimensionCheck.verification, 'local_image_header');
+    const again = await callTool('make_image', args, deps);
+    assert.equal(again.replayed, true);
+    assert.deepEqual(again.dimensionCheck, out.dimensionCheck);
+    assert.equal(submissions, 1);
+  }
+});
+
+test('Codex keeps a nonsquare image, reports the mismatch and never purchases a replacement', async () => {
+  const { deps, env } = await sandbox();
+  await callTool('set_image_source', { source: 'codex' }, deps);
+  let submissions = 0;
+  deps.run = async () => {
+    submissions++;
+    const made = path.join(env.CODEX_HOME, 'generated_images', 'mismatch', 'exec.png');
+    const bytes = Buffer.from(PNG); bytes.writeUInt32BE(800, 16); bytes.writeUInt32BE(1200, 20);
+    await fs.mkdir(path.dirname(made), { recursive: true }); await fs.writeFile(made, bytes);
+    return { code: 0, stdout: '{"thread_id":"mismatch"}\n', stderr: '' };
+  };
+  const args = { prompt: 'p', requestedSize: 'square', operationId: 'mismatch' };
+  const out = await callTool('make_image', args, deps);
+  assert.equal(out.dimensionCheck.status, 'mismatch');
+  assert.match(out.dimensionCheck.warning, /800x1200/);
+  assert.match(out.dimensionCheck.warning, /without automatic regeneration/);
+  await callTool('make_image', args, deps);
+  assert.equal(submissions, 1);
+  assert.ok((await fs.stat(out.path)).size > 0);
+});
+
+test('old Codex shape-blind journals still recover the saved file without claiming a format suffix or buying again', async () => {
+  const { deps, env } = await sandbox();
+  await callTool('set_image_source', { source: 'codex' }, deps);
+  let calls = 0;
+  deps.run = async () => {
+    calls++;
+    const made = path.join(env.CODEX_HOME, 'generated_images', 'legacy-shape', 'image.png');
+    await fs.mkdir(path.dirname(made), { recursive: true });
+    await fs.writeFile(made, PNG);
+    return { stdout: JSON.stringify({ type: 'thread.started', thread_id: 'legacy-shape' }) + '\n', stderr: '', code: 0 };
+  };
+  // The old route's fingerprint had no geometry; create that exact historical record.
+  const args = { prompt: 'ORIGINAL PLATE', operationId: 'legacy-claim' };
+  await callTool('make_image', args, deps);
+  const out = await callTool('make_image', { ...args, requestedSize: 'square' }, deps);
+  assert.equal(out.replayed, true);
+  assert.equal(out.actualPrompt, args.prompt, 'the old call never carried our new suffix');
+  assert.equal(out.dimensionCheck.status, 'matches');
+  assert.equal(calls, 1);
+  const folder = path.join(env.CLAUDE_PLUGIN_DATA, 'operations-v1');
+  const file = path.join(folder, (await fs.readdir(folder)).find((n) => n.endsWith('.json')));
+  const record = JSON.parse(await fs.readFile(file, 'utf8'));
+  record.state = 'uncertain';
+  await fs.writeFile(file, JSON.stringify(record));
+  await assert.rejects(callTool('make_image', { ...args, requestedSize: 'square' }, deps), /outcome is unclear/);
+  assert.equal(calls, 1, 'an older uncertain attempt is never submitted again');
+  await assert.rejects(callTool('make_image', { ...args, prompt: 'CHANGED', requestedSize: 'square' }, deps), /different image request/);
+});
+
+test('format transport preserves inputs, recognizes numeric shape aliases, and reports unknown headers honestly', () => {
+  const sentence = 'REQUESTED FORMAT: square. Verify the resulting dimensions; report a mismatch without silently regenerating.';
+  const sent = `Original\n\n${sentence}`;
+  assert.equal(formatPrompt(sent, 'square'), sent, 'a recorded suffix is never duplicated');
+  assert.equal(formatPrompt('Original', null), 'Original');
+  assert.equal(requestedFormat({ size: '1024x1024' }), 'square');
+  assert.equal(requestedFormat({ aspectRatio: '9:16' }), 'story');
+  assert.equal(requestedFormat({ size: 'auto' }), null);
+  assert.equal(requestedFormat({ aspectRatio: '1:0' }), null);
+  assert.deepEqual(dimensionReceipt(Buffer.from('not an image'), 'square').dimensionCheck, {
+    requestedSize: 'square', aspectRatio: '1:1', status: 'unverified', verification: 'unreadable_image_header', fullDecodeVerified: false,
+  });
 });
 
 test('codex route: references given as links are downloaded and attached with -i', async () => {
@@ -343,6 +439,6 @@ test('model-facing wording: the spreng-images tool descriptions and the image-so
   assert.doesNotMatch(make.inputSchema.properties.operationId.description, /switching source/);
   const skill = await fs.readFile(path.join(ROOT, 'plugins/spreng-images/skills/image-source/SKILL.md'));
   assert.doesNotMatch(String(skill), /also after switching source/);
-  assert.equal(hash(JSON.stringify(TOOLS)), 'a06a23c8d4bc04687c6f37ad0e811598231e49a6d2fbebe6d4a82cb540ce6c84', 'tool descriptions with receipt-only routing approved 2026-10-05');
-  assert.equal(hash(skill), 'dbbebbd1cd29663a5d50d6adf03f7229f31d386f9d3969b678d27704ec0f9be9', 'image-source skill with Oct7 H2 setup guidance and configuration-only readiness caveat');
+  assert.equal(hash(JSON.stringify(TOOLS)), 'deb0538b46f12104ab643cf852df707afdb84f62defd3da14a77ca155006718c', 'tool descriptions with owner-delegated format transport 2026-10-07');
+  assert.equal(hash(skill), '0792eaef09032bd2feb4b48ae390229f98c03b81800ad4af69f312f1c3932878', 'image-source skill with Oct7 H2 setup and approved shape transport');
 });

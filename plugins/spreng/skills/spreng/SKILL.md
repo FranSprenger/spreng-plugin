@@ -49,6 +49,8 @@ reference files. Spreng does not make images. Before calling `claim_native_image
 
 Generate only when the claim returns `mayGenerate: true`. Otherwise follow its waiting/recovery answer
 and use `get_native_run` for saved progress; do not generate the same claimed image again.
+Follow the claim's `promptHandling` for the creative text. Apply `imageToolSettings` through the host's size controls. When none exist, use its explicit `promptOnlySuffix` exception and retain the creative
+text unchanged. Record the complete sent text as `actualPrompt`. Check the returned file dimensions; report a mismatch without automatically generating another image.
 After generation, follow the claim's `next`: when it names `create_native_image_upload`, call it and PUT
 the file only if it returns `signedUrl`, with the file's Content-Type and no additional credentials.
 When the claim goes straight to `finalize_native_image`, or upload answers `uploadNeeded: false`, skip

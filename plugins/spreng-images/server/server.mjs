@@ -94,6 +94,7 @@ export const TOOLS = [
         prompt: { type: 'string', description: 'The prompt, exactly as Spreng\'s claim gave it (brief.renderPrompt) or as adapted and recorded.' },
         references: { type: 'array', items: { type: 'string' }, description: 'Reference images: https links or local file paths. Relative paths are inside the project.' },
         outPath: { type: 'string', description: 'Where to save the image. Relative paths are inside the project. Default: spreng-images/<time>.png in the project.' },
+        requestedSize: { type: 'string', enum: ['square', 'portrait', 'story', 'landscape'], description: 'Copy imageToolSettings.requestedSize from the Spreng claim. The Codex route carries the approved format-only suffix and reports actual file-header dimensions without regenerating a mismatch.' },
         aspectRatio: { type: 'string', description: 'For KIE, such as 1:1 or 9:16.' },
         size: { type: 'string', description: 'For OpenAI, such as 1024x1024 or auto.' },
         kieTaskId: { type: 'string', description: 'Collect a KIE task that was still running, instead of starting a new one.' },
@@ -151,7 +152,7 @@ export async function callTool(name, args = {}, deps = defaultDeps()) {
     // the Codex work folder. Links stay as they are.
     const references = (args.references || []).map((r) => (/^https?:\/\//i.test(r) ? r : path.resolve(project, r)));
     const job = {
-      prompt: args.prompt, references, outPath, tmpDir, size: args.size, aspectRatio: args.aspectRatio,
+      prompt: args.prompt, references, outPath, tmpDir, size: args.size, aspectRatio: args.aspectRatio, requestedSize: args.requestedSize,
       kieTaskId: args.kieTaskId, operationId: args.operationId, requestedOutPath: args.outPath, projectDir: project, stateDir: path.join(dataDir(env), JOURNAL_DIR),
     };
     try {

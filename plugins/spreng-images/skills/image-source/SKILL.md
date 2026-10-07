@@ -26,13 +26,16 @@ asks to use their own source. Keep an existing source choice unless the user ask
    the computer's secure storage). It is never typed into the chat or passed to a tool. Once it is set,
    the user restarts Claude Code so the add-on's server starts with it; `image_source_status` then shows
    the source as ready.
-3. Call `make_image` with the claim's `brief.renderPrompt` as `prompt`, its reference links as
-   `references` and the claim id as `operationId`. It saves the file in the project and returns its path.
+3. Follow the claim's `promptHandling` for the creative text, including its existing art-direction step
+   when requested. Call `make_image` with that text as `prompt`, the claim's reference links as
+   `references`, its `imageToolSettings.requestedSize` as `requestedSize`, and the claim id as `operationId`.
+   The Codex route carries the approved format-only suffix and returns `actualPrompt`, the file path,
+   and `dimensionCheck` from the returned image header. Report any mismatch; do not generate a replacement automatically.
    For `other`, follow the `next` text it returns.
 4. Follow the Spreng claim's `next`: if it names `create_native_image_upload`, call it and PUT the file
    only when it returns `signedUrl`. If the claim goes straight to `finalize_native_image`, or upload
    answers `uploadNeeded: false`, skip the upload and keep the file here. Call `finalize_native_image`
-   with `assetId`, `actualPrompt` and `host`; a receipt records completion without a Gallery copy.
+   with `assetId`, `actualPrompt` and `host`; use the add-on's returned `actualPrompt` when present. A receipt records completion without a Gallery copy.
 
 One `operationId` buys at most one image in each project, with every source except other. `make_image` records the request
 on this computer before calling Codex, OpenAI or KIE; the same `operationId` again returns the image already made, collects a KIE task already

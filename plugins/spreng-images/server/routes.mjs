@@ -18,6 +18,7 @@
 // charged twice for one image. Another image needs a new operation id.
 
 import path from 'node:path';
+import { requestedFormat, formatPrompt, dimensionReceipt } from './image-format.mjs';
 import {
   fingerprintOf, requestFingerprint, snapshotReferences, reserveOperation, updateOperation, releaseOperation, markUncertain, markFailed,
   completeOperation, replayOperation,
@@ -75,26 +76,34 @@ async function listImages(dir, fs) {
 }
 
 /** The text handed to `codex exec`: the Spreng prompt between markers, unchanged, plus how to return the file. */
-export function codexTask(prompt) {
+export function codexTask(prompt, format = null) {
   return [
     'Make one image with your built-in image generation tool from the prompt between the markers, word for word,',
     'using any attached images as the references the prompt describes. Do not edit or create other files.',
     'Reply with the path of the image file.',
     '<<<SPRENG_PROMPT',
-    prompt,
+    formatPrompt(prompt, format),
     'SPRENG_PROMPT>>>',
   ].join('\n');
 }
 
 export async function runCodex(job, deps) {
   const { prompt, tmpDir } = job;
+  const format = requestedFormat(job);
   const snap = await snapshotReferences(deps, job.references, tmpDir);
   const op = await reserveOperation(deps, {
     job, model: 'codex',
-    fingerprint: requestFingerprint(job, { source: 'codex' }, snap.hashes),
+    fingerprint: requestFingerprint(job, { source: 'codex', ...(format ? { format } : {}) }, snap.hashes),
     provider: 'Codex CLI',
+    ...(format ? { legacyFingerprint: requestFingerprint(job, { source: 'codex' }, snap.hashes) } : {}),
   });
-  if (!op.fresh) return replayOperation(deps, op);
+  if (!op.fresh) {
+    const result = await replayOperation(deps, op);
+    if (!op.legacy || !format) return result;
+    // A completed old operation used the original prompt. Measure its kept file but never pretend the new suffix ran.
+    return { ...result, originalPrompt: prompt, actualPrompt: prompt,
+      ...dimensionReceipt(await deps.fs.readFile(op.record.resultFile), format) };
+  }
   const codexHome = deps.env.CODEX_HOME || path.join(deps.homedir(), '.codex');
   const imagesDir = path.join(codexHome, 'generated_images');
   let before;
@@ -104,7 +113,7 @@ export async function runCodex(job, deps) {
     const refs = await localRefs(snap.refs, tmpDir, deps);
     args = ['exec', '--skip-git-repo-check', '--sandbox', 'read-only', '--json', '-C', tmpDir];
     for (const r of refs) args.push('-i', r);
-    args.push(codexTask(prompt));
+    args.push(codexTask(prompt, format));
     await deps.fs.mkdir(tmpDir, { recursive: true });
   } catch (e) {
     await releaseOperation(deps, op); // codex was not started
@@ -141,7 +150,10 @@ export async function runCodex(job, deps) {
   if (!pick) throw await unclear(`codex thread ${thread} finished but no new image appeared in ${threadDir}; images from other Codex sessions are never used (is the Codex CLI signed in with a ChatGPT plan that includes images?)`);
   let bytes;
   try { bytes = await deps.fs.readFile(pick); } catch (e) { throw await unclear(`the image codex made at ${pick} could not be read: ${e.message}`); }
-  return completeOperation(deps, op, bytes, job.outPath, { source: 'codex', madeBy: 'Codex CLI image tool', codexFile: pick });
+  return completeOperation(deps, op, bytes, job.outPath, {
+    source: 'codex', madeBy: 'Codex CLI image tool', codexFile: pick,
+    ...(format ? { originalPrompt: prompt, actualPrompt: formatPrompt(prompt, format), ...dimensionReceipt(bytes, format) } : {}),
+  });
 }
 
 /** A clear refusal from a provider (nothing was charged): any 4xx except 408 (timeout). */
