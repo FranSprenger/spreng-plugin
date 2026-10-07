@@ -133,7 +133,7 @@ export async function callTool(name, args = {}, deps = defaultDeps()) {
   }
   if (name === 'make_image') {
     const choice = await readChoice(deps);
-    if (!choice?.source) throw new Error('No image source chosen yet: ask the user once (codex, openai, kie or other) and call set_image_source.');
+    if (!choice?.source) throw new Error('No image source chosen yet: follow the image-source setup for the existing Codex account, checking sign-in and image capability, then call set_image_source with the user\'s choice. Keep any source the user explicitly chose.');
     if (typeof args.prompt !== 'string' || !args.prompt.trim()) throw new Error('prompt is required.');
     const stamp = deps.now().toISOString().replace(/[:.]/g, '-');
     const unique = `${stamp}-${randomUUID().slice(0, 8)}`;

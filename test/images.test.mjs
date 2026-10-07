@@ -30,7 +30,12 @@ const res = (status, body, extra = {}) => ({ ok: status >= 200 && status < 300, 
 
 test('no choice yet: make_image asks for set_image_source; status shows nothing chosen and no key', async () => {
   const { deps } = await sandbox({ SPRENG_IMAGES_OPENAI_KEY: OPENAI_KEY });
-  await assert.rejects(callTool('make_image', { prompt: 'x' }, deps), /set_image_source/);
+  await assert.rejects(callTool('make_image', { prompt: 'x' }, deps), (error) => {
+    assert.match(error.message, /set_image_source/);
+    assert.match(error.message, /Codex/);
+    assert.doesNotMatch(error.message, /openai|kie|API key/i, 'new setup does not offer a billed API by default');
+    return true;
+  });
   const s = await callTool('image_source_status', {}, deps);
   assert.equal(s.choice, null);
   assert.equal(s.ready.openai, true);
@@ -440,5 +445,5 @@ test('model-facing wording: the spreng-images tool descriptions and the image-so
   const skill = await fs.readFile(path.join(ROOT, 'plugins/spreng-images/skills/image-source/SKILL.md'));
   assert.doesNotMatch(String(skill), /also after switching source/);
   assert.equal(hash(JSON.stringify(TOOLS)), 'deb0538b46f12104ab643cf852df707afdb84f62defd3da14a77ca155006718c', 'tool descriptions with owner-delegated format transport 2026-10-07');
-  assert.equal(hash(skill), '0792eaef09032bd2feb4b48ae390229f98c03b81800ad4af69f312f1c3932878', 'image-source skill with Oct7 H2 setup and approved shape transport');
+  assert.equal(hash(skill), 'e9eab200ed3be3dd61862171e8d00b56bbed3d747c113dae92168e8f18b1fefa', 'image-source skill with H2 Codex-first setup and approved shape transport');
 });

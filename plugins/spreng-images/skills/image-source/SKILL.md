@@ -16,7 +16,7 @@ asks to use their own source. Keep an existing source choice unless the user ask
    For Codex, use `codex login status` and confirm the installed runtime supports image generation before a Spreng claim.
    If capability is unknown, keep the plan unclaimed and explain the uncertainty; do not use a paid image as a setup probe.
    If `choice` is set and its prerequisites are known, go to step 3.
-2. Ask the user once which source to use, and call `set_image_source` with it:
+2. For a new Spreng setup, guide the user to Codex and call `set_image_source` once chosen. Use the other options below only when the user explicitly requests their own source:
    - `codex`: their Codex CLI, signed in with their ChatGPT plan (`codex login`). Images come from Codex's
      own image tool on their plan.
    - `openai`: their own OpenAI API key, billed on their OpenAI account.
