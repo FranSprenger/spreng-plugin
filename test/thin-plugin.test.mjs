@@ -109,6 +109,8 @@ test('first-run image setup precedes claim and gives Claude Code a concrete Code
   assert.match(skill, /claude plugin install spreng-images@spreng/);
   assert.match(skill, /choose Codex/);
   assert.match(skill, /imageSource: codex_cli/);
+  assert.match(skill, /codex login status/);
+  assert.match(skill, /does not verify sign-in or image capability/);
   assert.match(skill, /account's own usage limits/);
   assert.match(skill, /list_native_runs/);
   const source = read('plugins/spreng-images/skills/image-source/SKILL.md');

@@ -12,7 +12,10 @@ For Spreng onboarding, guide the user to their existing Codex account first. Exp
 Do not offer a billed API source by default; the OpenAI and KIE setup below is for a user who explicitly
 asks to use their own source. Keep an existing source choice unless the user asks to change it.
 
-1. Call `image_source_status`. If `choice` is set, go to step 3.
+1. Call `image_source_status`. Its `ready` flags check local configuration, not successful authentication or image capability.
+   For Codex, use `codex login status` and confirm the installed runtime supports image generation before a Spreng claim.
+   If capability is unknown, keep the plan unclaimed and explain the uncertainty; do not use a paid image as a setup probe.
+   If `choice` is set and its prerequisites are known, go to step 3.
 2. Ask the user once which source to use, and call `set_image_source` with it:
    - `codex`: their Codex CLI, signed in with their ChatGPT plan (`codex login`). Images come from Codex's
      own image tool on their plan.

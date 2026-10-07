@@ -333,7 +333,8 @@ test('the real server answers initialize and tools/list over stdio', async () =>
 });
 
 // Model-facing wording (tool descriptions and the image-source skill) changes only with the owner's prior permission.
-// Pinned to 741f10e plus the owner-authorized receipt-only routing correction on 2026-10-05.
+// Pinned tool text retains the 2026-10-05 receipt routing; the skill includes owner-authorized
+// 2026-10-07 H2 setup guidance. No creative direction was added.
 test('model-facing wording: the spreng-images tool descriptions and the image-source skill are the approved text', async () => {
   const { createHash } = await import('node:crypto');
   const hash = (d) => createHash('sha256').update(d).digest('hex');
@@ -343,5 +344,5 @@ test('model-facing wording: the spreng-images tool descriptions and the image-so
   const skill = await fs.readFile(path.join(ROOT, 'plugins/spreng-images/skills/image-source/SKILL.md'));
   assert.doesNotMatch(String(skill), /also after switching source/);
   assert.equal(hash(JSON.stringify(TOOLS)), 'a06a23c8d4bc04687c6f37ad0e811598231e49a6d2fbebe6d4a82cb540ce6c84', 'tool descriptions with receipt-only routing approved 2026-10-05');
-  assert.equal(hash(skill), '03f213af9cd86f7a688691621cdb3b082025bcfa565b89a03ed516bbbb7127ff', 'image-source skill with receipt-only routing approved 2026-10-05');
+  assert.equal(hash(skill), 'dbbebbd1cd29663a5d50d6adf03f7229f31d386f9d3969b678d27704ec0f9be9', 'image-source skill with Oct7 H2 setup guidance and configuration-only readiness caveat');
 });

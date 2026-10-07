@@ -61,7 +61,8 @@ completion is recorded; the host keeps the image and there is no Gallery copy. F
 - Claude Code has none built in. If no image tool is connected, keep the plan saved and give concrete setup steps:
   run `claude plugin install spreng-images@spreng` from the same marketplace, restart Claude Code, then use the add-on's
   image-source setup to choose Codex. It needs the Codex CLI installed and signed in by the user with `codex login`.
-  Check the add-on's source status before a claim, then call `studio_start` with `imageSource: codex_cli`.
+  Use `codex login status` to check sign-in. The add-on's source status checks configuration only; it does not verify sign-in or image capability.
+  Confirm this Codex installation supports image generation before a claim, then call `studio_start` with `imageSource: codex_cli`.
   This uses their existing Codex account, subject to its limits; no Spreng purchase is required. Do not suggest a billed API source by default.
 - Alternatively, finish in an image-capable Codex or ChatGPT session: `list_native_runs`, then `get_native_run` with the saved run id.
   Generate only unclaimed images; keep an already-started image for recovery instead of claiming or generating it again.
