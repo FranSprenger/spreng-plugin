@@ -113,6 +113,7 @@ test('first-run image setup precedes claim and gives Claude Code a concrete Code
   assert.match(skill, /does not verify sign-in or image capability/);
   assert.match(skill, /account's own usage limits/);
   assert.match(skill, /list_native_runs/);
+  assert.match(skill, /waitingFor: image_context.*claim_native_text_unit.*submit_native_text_answer.*publish_native_text_run.*claim_native_image/);
   const source = read('plugins/spreng-images/skills/image-source/SKILL.md');
   assert.match(source, /Do not offer a billed API source by default/);
   assert.match(source, /Keep an existing source choice/);
