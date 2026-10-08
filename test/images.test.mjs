@@ -10,6 +10,7 @@ import { ROOT } from './helpers.mjs';
 import { callTool, handle, scrub, TOOLS } from '../plugins/spreng-images/server/server.mjs';
 import { codexTask, kieInput, secret } from '../plugins/spreng-images/server/routes.mjs';
 import { dimensionReceipt, formatPrompt, requestedFormat } from '../plugins/spreng-images/server/image-format.mjs';
+import { requestFingerprint, snapshotReferences, reserveOperation, completeOperation, markUncertain } from '../plugins/spreng-images/server/operations.mjs';
 
 const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489', 'hex');
 const OPENAI_KEY = 'sk-test-openai-0000000000000000';
@@ -162,6 +163,87 @@ test('old Codex shape-blind journals still recover the saved file without claimi
   await assert.rejects(callTool('make_image', { ...args, requestedSize: 'square' }, deps), /outcome is unclear/);
   assert.equal(calls, 1, 'an older uncertain attempt is never submitted again');
   await assert.rejects(callTool('make_image', { ...args, prompt: 'CHANGED', requestedSize: 'square' }, deps), /different image request/);
+});
+
+// Seed the exact pre-A3 H2 fingerprint and receipt without running an image provider.
+async function historicalInferredCodex(shapeArgs, format, uncertain = false) {
+  const { deps, env } = await sandbox();
+  await callTool('set_image_source', { source: 'codex' }, deps);
+  await fs.mkdir(env.CLAUDE_PROJECT_DIR, { recursive: true });
+  const projectDir = await fs.realpath(env.CLAUDE_PROJECT_DIR);
+  const reference = path.join(projectDir, 'reference.png');
+  await fs.writeFile(reference, PNG);
+  const args = { prompt: 'H2 ORIGINAL PLATE', references: ['reference.png'], operationId: 'h2-inferred', outPath: 'original.png', ...shapeArgs };
+  const job = { ...args, projectDir, references: [reference], outPath: path.join(projectDir, args.outPath),
+    tmpDir: path.join(env.CLAUDE_PLUGIN_DATA, 'historical-work'), stateDir: path.join(env.CLAUDE_PLUGIN_DATA, 'operations-v1') };
+  const snap = await snapshotReferences(deps, job.references, job.tmpDir);
+  const op = await reserveOperation(deps, { job, model: 'codex', provider: 'Codex CLI',
+    fingerprint: requestFingerprint(job, { source: 'codex', format }, snap.hashes) });
+  const bytes = Buffer.from(PNG);
+  const [width, height] = { square: [1024, 1024], portrait: [800, 1000], story: [900, 1600], landscape: [1600, 900] }[format];
+  bytes.writeUInt32BE(width, 16); bytes.writeUInt32BE(height, 20);
+  const receipt = dimensionReceipt(bytes, format);
+  // The old H2 landscape receipt recorded 16:9, before A3 added the native 3:2 preference.
+  if (format === 'landscape') receipt.dimensionCheck.aspectRatio = '16:9';
+  const historicalResult = { source: 'codex', madeBy: 'Codex CLI image tool', originalPrompt: args.prompt,
+    actualPrompt: formatPrompt(args.prompt, format), ...receipt };
+  if (uncertain) await markUncertain(deps, op, 'historical lost answer');
+  else {
+    await completeOperation(deps, op, bytes, job.outPath, historicalResult);
+    await fs.rm(job.outPath); // recovery must restore the kept bytes, not merely return a stale path
+  }
+  let calls = 0;
+  deps.run = async () => { calls++; throw new Error('historical operation must never be sent again'); };
+  deps.fetch = async () => { calls++; throw new Error('historical operation must never call a provider'); };
+  return { deps, args, historicalResult, bytes, reference, calls: () => calls };
+}
+
+test('H2 inferred Codex journals recover exact historical prompts and receipts with zero provider calls', async () => {
+  for (const [shapeArgs, format] of [
+    [{ size: '1024x1024' }, 'square'], [{ aspectRatio: '800:1000' }, 'portrait'],
+    [{ aspectRatio: '9:16' }, 'story'], [{ size: '1920x1080' }, 'landscape'],
+    [{ aspectRatio: '4:5', size: '1024x1024' }, 'portrait'],
+  ]) {
+    const saved = await historicalInferredCodex(shapeArgs, format);
+    const out = await callTool('make_image', saved.args, saved.deps);
+    assert.equal(out.replayed, true);
+    assert.equal(out.actualPrompt, saved.historicalResult.actualPrompt, 'recovery must retain the suffix that was really sent');
+    assert.deepEqual(out.dimensionCheck, saved.historicalResult.dimensionCheck, 'the saved receipt is not rewritten');
+    assert.deepEqual(await fs.readFile(out.path), saved.bytes);
+    assert.equal(saved.calls(), 0);
+  }
+});
+
+test('H2 inferred Codex uncertain journals stay uncertain; changed prompts or references never recover', async () => {
+  const uncertain = await historicalInferredCodex({ size: '1024x1024' }, 'square', true);
+  await assert.rejects(callTool('make_image', uncertain.args, uncertain.deps), /outcome is unclear.*historical lost answer/);
+  assert.equal(uncertain.calls(), 0);
+  const completed = await historicalInferredCodex({ aspectRatio: '9:16' }, 'story');
+  await assert.rejects(callTool('make_image', { ...completed.args, prompt: 'CHANGED' }, completed.deps), /different image request/);
+  await fs.writeFile(completed.reference, Buffer.concat([PNG, Buffer.from('changed')]));
+  await assert.rejects(callTool('make_image', completed.args, completed.deps), /different image request/);
+  assert.equal(completed.calls(), 0);
+});
+
+test('fresh Codex jobs with inferred geometry still send no format suffix and replay without a second call', async () => {
+  for (const shapeArgs of [{ size: '1024x1024' }, { aspectRatio: '4:5' }, { aspectRatio: '9:16' }, { size: '1920x1080' }]) {
+    const { deps, env } = await sandbox();
+    await callTool('set_image_source', { source: 'codex' }, deps);
+    let calls = 0;
+    deps.run = async (_cmd, args) => {
+      calls++;
+      assert.ok(args.at(-1).includes('<<<SPRENG_PROMPT\nUNSUFFIXED PLATE\nSPRENG_PROMPT>>>'));
+      assert.ok(!args.at(-1).includes('REQUESTED FORMAT:'));
+      const made = path.join(env.CODEX_HOME, 'generated_images', 'fresh-inferred', 'image.png');
+      await fs.mkdir(path.dirname(made), { recursive: true });
+      await fs.writeFile(made, PNG);
+      return { code: 0, stdout: '{"thread_id":"fresh-inferred"}\n', stderr: '' };
+    };
+    const args = { prompt: 'UNSUFFIXED PLATE', operationId: 'fresh-inferred', ...shapeArgs };
+    await callTool('make_image', args, deps);
+    assert.equal((await callTool('make_image', args, deps)).replayed, true);
+    assert.equal(calls, 1);
+  }
 });
 
 test('format transport requires an explicit request and reports unknown headers honestly', () => {

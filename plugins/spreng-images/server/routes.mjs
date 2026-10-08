@@ -91,11 +91,21 @@ export async function runCodex(job, deps) {
   const { prompt, tmpDir } = job;
   const format = requestedFormat(job);
   const snap = await snapshotReferences(deps, job.references, tmpDir);
+  let legacyFingerprint = format ? requestFingerprint(job, { source: 'codex' }, snap.hashes) : undefined;
+  if (!format) {
+    // Unpublished H2 inferred a suffix from size/ratio. Recognize only its exact old fingerprint
+    // for journal recovery; fresh requests still use the unsuffixed prompt and fingerprint.
+    const parts = /^(\d+):(\d+)$/.exec(job.aspectRatio || job.size?.replace('x', ':') || '');
+    const oldRatios = { square: 1, portrait: 4 / 5, story: 9 / 16, landscape: 16 / 9 };
+    const oldFormat = parts && Number(parts[2]) !== 0
+      ? Object.keys(oldRatios).find((shape) => Math.abs(Number(parts[1]) / Number(parts[2]) - oldRatios[shape]) < 0.000001)
+      : null;
+    if (oldFormat) legacyFingerprint = requestFingerprint(job, { source: 'codex', format: oldFormat }, snap.hashes);
+  }
   const op = await reserveOperation(deps, {
     job, model: 'codex',
     fingerprint: requestFingerprint(job, { source: 'codex', ...(format ? { format } : {}) }, snap.hashes),
-    provider: 'Codex CLI',
-    ...(format ? { legacyFingerprint: requestFingerprint(job, { source: 'codex' }, snap.hashes) } : {}),
+    provider: 'Codex CLI', legacyFingerprint,
   });
   if (!op.fresh) {
     const result = await replayOperation(deps, op);
