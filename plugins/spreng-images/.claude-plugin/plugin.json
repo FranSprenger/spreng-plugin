@@ -1,7 +1,7 @@
 {
   "name": "spreng-images",
   "displayName": "Spreng Images",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Claude Code add-on for Spreng: Claude Code has no image tool of its own, so this lets it make images through a source you choose once: your Codex CLI signed in with ChatGPT, your own OpenAI key, your own KIE key, or another source you name. Keys stay on your computer.",
   "author": {
     "name": "Fran Sprenger",
