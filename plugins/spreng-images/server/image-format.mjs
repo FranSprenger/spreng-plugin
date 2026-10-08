@@ -1,16 +1,10 @@
 import { readImageDimensions } from './image-dimensions.mjs';
 
-const SHAPES = { square: '1:1', portrait: '4:5', story: '9:16', landscape: '16:9' };
+const SHAPES = { square: '1:1', portrait: '4:5', story: '9:16', landscape: '3:2' };
 
 export function requestedFormat(job) {
   if (Object.hasOwn(SHAPES, job.requestedSize ?? '')) return job.requestedSize;
-  const ratio = job.aspectRatio || job.size?.replace('x', ':');
-  const parts = /^(\d+):(\d+)$/.exec(ratio || '');
-  if (!parts || Number(parts[2]) === 0) return null;
-  return Object.keys(SHAPES).find((shape) => {
-    const [w, h] = SHAPES[shape].split(':').map(Number);
-    return Math.abs(Number(parts[1]) / Number(parts[2]) - w / h) < 0.000001;
-  }) || null;
+  return null;
 }
 
 /** This one format-only sentence was approved by the owner on 2026-10-07. */
@@ -30,7 +24,7 @@ export function dimensionReceipt(bytes, format) {
   const dimensions = readImageDimensions(bytes);
   const aspectRatio = SHAPES[format] || null;
   const [w, h] = aspectRatio ? aspectRatio.split(':').map(Number) : [];
-  const matches = dimensions && aspectRatio ? Math.abs(dimensions.width / dimensions.height - w / h) <= 0.015 : null;
+  const matches = dimensions && aspectRatio ? [w / h, ...(format === 'landscape' ? [16 / 9] : [])].some((ratio) => Math.abs(dimensions.width / dimensions.height - ratio) <= 0.015) : null;
   return {
     dimensions,
     dimensionCheck: {

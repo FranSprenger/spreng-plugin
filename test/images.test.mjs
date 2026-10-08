@@ -77,13 +77,14 @@ test('codex route: runs codex exec once with the prompt unchanged and copies the
   assert.equal(seen.args[0], 'exec');
   assert.ok(seen.args.includes('--sandbox') && seen.args[seen.args.indexOf('--sandbox') + 1] === 'read-only');
   assert.ok(seen.args.at(-1).includes(`<<<SPRENG_PROMPT\n${prompt}\nSPRENG_PROMPT>>>`), 'prompt passed word for word');
+  assert.ok(!seen.args.at(-1).includes('REQUESTED FORMAT:'), 'A3: absent requestedSize keeps the prompt unchanged despite tool defaults');
   assert.equal(out.path, path.join(env.CLAUDE_PROJECT_DIR, 'ads/one.png'));
   assert.ok(out.codexFile.endsWith(path.join('thread-42', 'exec-new.png')));
   assert.deepEqual(await fs.readFile(out.path), PNG);
 });
 
 test('Codex receives requested shape, measures its returned header, and replays without regeneration', async () => {
-  for (const [requestedSize, width, height] of [['square', 1024, 1024], ['portrait', 800, 1000], ['story', 900, 1600], ['landscape', 1600, 900]]) {
+  for (const [requestedSize, width, height] of [['square', 1024, 1024], ['portrait', 800, 1000], ['story', 900, 1600], ['landscape', 1536, 1024], ['landscape', 1600, 900]]) {
     const { deps, env } = await sandbox();
     await callTool('set_image_source', { source: 'codex' }, deps);
     let submissions = 0;
@@ -163,13 +164,13 @@ test('old Codex shape-blind journals still recover the saved file without claimi
   await assert.rejects(callTool('make_image', { ...args, prompt: 'CHANGED', requestedSize: 'square' }, deps), /different image request/);
 });
 
-test('format transport preserves inputs, recognizes numeric shape aliases, and reports unknown headers honestly', () => {
+test('format transport requires an explicit request and reports unknown headers honestly', () => {
   const sentence = 'REQUESTED FORMAT: square. Verify the resulting dimensions; report a mismatch without silently regenerating.';
   const sent = `Original\n\n${sentence}`;
   assert.equal(formatPrompt(sent, 'square'), sent, 'a recorded suffix is never duplicated');
   assert.equal(formatPrompt('Original', null), 'Original');
-  assert.equal(requestedFormat({ size: '1024x1024' }), 'square');
-  assert.equal(requestedFormat({ aspectRatio: '9:16' }), 'story');
+  assert.equal(requestedFormat({ size: '1024x1024' }), null, 'A3: size defaults cannot request a suffix');
+  assert.equal(requestedFormat({ aspectRatio: '9:16' }), null, 'A3: ratio defaults cannot request a suffix');
   assert.equal(requestedFormat({ size: 'auto' }), null);
   assert.equal(requestedFormat({ aspectRatio: '1:0' }), null);
   assert.deepEqual(dimensionReceipt(Buffer.from('not an image'), 'square').dimensionCheck, {
