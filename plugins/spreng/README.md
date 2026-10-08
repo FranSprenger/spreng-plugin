@@ -1,5 +1,7 @@
 # Spreng
 
+For images, the connector always sends the Prompt Plate plus your own inputs. The web app keeps its own Creative rules setting. Prompt handling still lets you choose AI art direction or exact template.
+
 Spreng connects your assistant (Claude Code, Codex, claude.ai or ChatGPT) to your Spreng account. Your
 account keeps each client's offer, saved research, angles and Prompt Plates. When you ask for ads, Spreng
 prepares a plan from what you saved: the plate, the angle and the reference files for each image. Your

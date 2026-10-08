@@ -5,6 +5,7 @@ description: Spreng router and first-run guide. Use when the user mentions Spren
 
 # Spreng
 
+For images, the connector always sends the Prompt Plate plus your own inputs. The web app keeps its own Creative rules setting. Prompt handling still lets you choose AI art direction or exact template.
 Spreng keeps each client's offer, saved research, angles and Prompt Plates in the user's Spreng account.
 The `spreng` connector (`https://app.spreng.io/mcp`) prepares each step from that account and saves the
 text, plans and image completion records back. Image files stay with the host when the account keeps no
@@ -48,7 +49,6 @@ The image comes from this session's available image tool, made from the claim's 
 reference files. Spreng does not make images. Before calling `claim_native_image`, check that the session can generate an image.
 
 Generate only when the claim returns `mayGenerate: true`; otherwise follow its waiting/recovery answer and use `get_native_run` for saved progress. Do not generate the same claimed image again.
-For `waitingFor: image_context`, use preparation.runId with `claim_native_text_unit`, `submit_native_text_answer`, then `publish_native_text_run`; return to `claim_native_image` for the same asset only when published:true. Otherwise follow the returned recovery guidance.
 Follow the claim's `promptHandling` for the creative text. Apply `imageToolSettings` through the host's size controls. When none exist, use its explicit `promptOnlySuffix` exception and retain the creative
 text unchanged. Record the complete sent text as `actualPrompt`. Check the returned file dimensions; report a mismatch without automatically generating another image.
 After generation, follow the claim's `next`: when it names `create_native_image_upload`, call it and PUT

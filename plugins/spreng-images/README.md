@@ -1,5 +1,7 @@
 # Spreng Images (Claude Code add-on)
 
+For images, the connector always sends the Prompt Plate plus your own inputs. The web app keeps its own Creative rules setting. Prompt handling still lets you choose AI art direction or exact template.
+
 Claude Code has no image tool of its own. This add-on lets Claude Code make the images for a Spreng ad
 run through an image source you choose once and that this computer remembers: your Codex CLI signed in
 with your ChatGPT plan, your own OpenAI API key, your own KIE API key, or another source you name. After
