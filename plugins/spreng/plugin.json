@@ -41,7 +41,7 @@
         ],
         "brandColor": "#0D6EE8",
         "composerIcon": "./assets/icon.png",
-        "logo": "./assets/logo.png"
+        "logo": "./assets/icon.png"
       },
       "onboardingSkill": "./skills/spreng/SKILL.md",
       "review": {

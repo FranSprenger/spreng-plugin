@@ -10,11 +10,20 @@ import { ROOT, read, json, files, pngSize, hosts } from './helpers.mjs';
 const P = 'plugins/spreng';
 const MCP_URL = 'https://app.spreng.io/mcp';
 const ALLOWED = [
-  '.claude-plugin/plugin.json', 'LICENSE', 'README.md', 'assets/icon.png', 'assets/logo.png',
+  '.claude-plugin/plugin.json', 'LICENSE', 'README.md', 'assets/icon.png',
   'mcp.json', 'plugin.json', 'skills/spreng/SKILL.md',
 ].map((f) => path.join(P, f)).sort();
 
-test('the listed plugin holds only manifests, one skill, README, LICENSE and two images', () => {
+// R2-fable-07: logo.png was a byte-identical copy of icon.png. The OpenAI interface takes a path per field, so both
+// name the one file (as spreng-research's manifest already does).
+test('logo and composerIcon name the one image file', () => {
+  const i = json(`${P}/plugin.json`).extensions['com.openai'].interface;
+  assert.equal(i.logo, './assets/icon.png');
+  assert.equal(i.composerIcon, './assets/icon.png');
+  assert.equal(json(`${P}/.claude-plugin/plugin.json`).icon, './assets/icon.png');
+});
+
+test('the listed plugin holds only manifests, one skill, README, LICENSE and one image', () => {
   assert.deepEqual(files(P), ALLOWED);
   for (const f of files(P)) {
     const size = fs.statSync(path.join(ROOT, f)).size;
