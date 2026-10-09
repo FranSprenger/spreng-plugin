@@ -59,8 +59,19 @@ test('Agent Plugins manifest and mcp.json: same identity, one streamable-http se
   assert.equal(o.hooks, undefined, 'ZIPs with lifecycle hooks cannot be submitted');
 });
 
+test('the tool fixture is the served tools/list: a free list, a paid list, and tools as their union (R2-fable-06)', () => {
+  const { free, paid, tools } = json('test/fixtures/spreng-mcp-tools.json');
+  assert.ok(Array.isArray(free) && Array.isArray(paid), 'captured per plan');
+  assert.equal(free.length, 41, 'a free account is served 41 tools');
+  for (const t of ['studio_start', 'create_client', 'save_record', 'get_records', 'studio_catalog', 'studio_get', 'delete_client',
+    'list_native_text_runs', 'get_image_preferences', 'set_prompt_handling', 'save_brand_asset']) assert.ok(free.includes(t), t);
+  assert.ok(!free.includes('get_saved_images') && paid.includes('get_saved_images'), 'Gallery is a paid-account tool');
+  assert.deepEqual([...tools].sort(), [...new Set([...free, ...paid])].sort());
+});
+
 test('review cases: five positive and three negative, positive ones name only tools the connector has', () => {
-  const { tools } = json('test/fixtures/spreng-mcp-tools.json');
+  // The reviewers' account is a free account (charm-scanner scripts/seed-reviewer-account.mjs): its list is the check.
+  const { free: tools } = json('test/fixtures/spreng-mcp-tools.json');
   const { positive, negative } = json(`${P}/plugin.json`).extensions['com.openai'].review.test_cases;
   assert.equal(positive.length, 5);
   assert.equal(negative.length, 3);
