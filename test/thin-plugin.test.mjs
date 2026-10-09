@@ -212,3 +212,12 @@ test('marketplaces: Claude lists the three plugins by relative path; Codex lists
     assert.ok(p.policy.installation && p.policy.authentication && p.category);
   }
 });
+
+// R2-fable-05: the prompt command form was unverified, so the skill names no exact form. R2-fable-01: the connector
+// serves the saved-research record format, not a research method, and the skill says exactly that.
+test('the skill claims no unverified command form and promises no research method', () => {
+  const skill = read(`${P}/skills/spreng/SKILL.md`);
+  assert.doesNotMatch(skill, /\/spreng:/, 'no unverified /spreng:<name> command form');
+  assert.doesNotMatch(skill, /research method/i);
+  assert.match(skill, /`studio_get` with kind sop and slug research-vault gives the record format/);
+});
