@@ -12,10 +12,10 @@
   "license": "MIT",
   "keywords": ["ads", "advertising", "research", "angles", "marketing"],
   "icon": "./assets/icon.png",
-  "documentationUrl": "https://spreng.io/docs/plugin",
-  "supportUrl": "https://spreng.io/support",
-  "privacyPolicyUrl": "https://spreng.io/privacy",
-  "termsOfServiceUrl": "https://spreng.io/terms",
+  "documentationUrl": "https://app.spreng.io/docs/plugin",
+  "supportUrl": "https://app.spreng.io/support",
+  "privacyPolicyUrl": "https://app.spreng.io/privacy",
+  "termsOfServiceUrl": "https://app.spreng.io/terms",
   "mcpServers": {
     "spreng": {
       "type": "http",

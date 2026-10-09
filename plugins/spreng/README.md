@@ -78,4 +78,5 @@ image-capable Codex or ChatGPT session using `list_native_runs` and `get_native_
 
 ## Support
 
-https://spreng.io/support. Privacy policy: https://spreng.io/privacy. Terms: https://spreng.io/terms.
+https://app.spreng.io/support. Privacy policy: https://app.spreng.io/privacy. Terms: https://app.spreng.io/terms.
+Plugin docs: https://app.spreng.io/docs/plugin.

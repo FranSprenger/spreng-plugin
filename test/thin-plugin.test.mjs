@@ -71,6 +71,45 @@ test('review cases: five positive and three negative, positive ones name only to
   for (const c of negative) assert.ok(c.description && c.prompt);
 });
 
+// The directory reviewers sign in to an account seeded with one made-up brand (charm-scanner
+// scripts/seed-reviewer-account.mjs, BRAND). Every review case that names a brand must name that one.
+const REVIEWER_BRAND = 'Brindlefen Candle Co.';
+
+test('review cases name the brand the reviewer account is seeded with', () => {
+  const raw = read(`${P}/plugin.json`);
+  assert.doesNotMatch(raw, /Mossgate/, 'the reviewer account has no Mossgate Pottery client');
+  const { positive, negative } = json(`${P}/plugin.json`).extensions['com.openai'].review.test_cases;
+  assert.ok(positive[0].expected_behavior.includes(REVIEWER_BRAND), 'the list case names the seeded client');
+  for (const c of positive.slice(1)) assert.ok(c.prompt.includes(REVIEWER_BRAND), `case "${c.description}" names the seeded client`);
+  assert.ok(negative.some((c) => c.prompt.includes(REVIEWER_BRAND)), 'the video refusal case names the seeded client');
+});
+
+// Directory links must open real pages. Checked 2026-10-09 against the deployed route tables: app.spreng.io
+// serves /docs/plugin, /support, /privacy and /terms (charm-scanner src/App.tsx, PUBLIC_PLUGIN_PAGE_PATHS);
+// spreng.io routes only /, /privacy, /terms, /dpa, /subprocessors, /refund, /meta-data-deletion, /security and
+// /contact, and renders "Page not found" for /docs/plugin and /support.
+const DIRECTORY_PAGES = {
+  docs: 'https://app.spreng.io/docs/plugin',
+  support: 'https://app.spreng.io/support',
+  privacy: 'https://app.spreng.io/privacy',
+  terms: 'https://app.spreng.io/terms',
+};
+
+test('manifest and README directory links point at pages that exist', () => {
+  const c = json(`${P}/.claude-plugin/plugin.json`);
+  assert.equal(c.documentationUrl, DIRECTORY_PAGES.docs);
+  assert.equal(c.supportUrl, DIRECTORY_PAGES.support);
+  assert.equal(c.privacyPolicyUrl, DIRECTORY_PAGES.privacy);
+  assert.equal(c.termsOfServiceUrl, DIRECTORY_PAGES.terms);
+  const i = json(`${P}/plugin.json`).extensions['com.openai'].interface;
+  assert.equal(i.supportURL, DIRECTORY_PAGES.support);
+  assert.equal(i.privacyPolicyURL, DIRECTORY_PAGES.privacy);
+  assert.equal(i.termsOfServiceURL, DIRECTORY_PAGES.terms);
+  const readme = read(`${P}/README.md`);
+  for (const u of Object.values(DIRECTORY_PAGES).filter((u) => u !== DIRECTORY_PAGES.docs)) assert.ok(readme.includes(u), `README names ${u}`);
+  assert.doesNotMatch(readme, /https:\/\/spreng\.io\/(docs|support)/, 'spreng.io has no docs or support page');
+});
+
 test('the skill names only connector tools and carries no method text', () => {
   const { tools } = json('test/fixtures/spreng-mcp-tools.json');
   const skill = read(`${P}/skills/spreng/SKILL.md`);
