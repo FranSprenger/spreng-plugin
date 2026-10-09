@@ -528,5 +528,8 @@ test('model-facing wording: the spreng-images tool descriptions and the image-so
   const skill = await fs.readFile(path.join(ROOT, 'plugins/spreng-images/skills/image-source/SKILL.md'));
   assert.doesNotMatch(String(skill), /also after switching source/);
   assert.equal(hash(JSON.stringify(TOOLS)), 'deb0538b46f12104ab643cf852df707afdb84f62defd3da14a77ca155006718c', 'tool descriptions with owner-delegated format transport 2026-10-07');
-  assert.equal(hash(skill), '0b76945792104ce07ab1581ae67ab32126903a2f9049599d9983f5838c6f3e1b', 'image-source skill with H2 setup, approved shape transport and 2026-10-08 connector policy');
+  // LOOP-99 R2 (chair, 2026-10-09): the sentence about the web app's own Creative rules setting was removed; plugin
+  // users are on the connector, where it does not apply. Removal only, no new wording.
+  assert.match(String(skill), /connector always sends the Prompt Plate plus your own inputs\. Prompt handling/);
+  assert.equal(hash(skill), '20ce59c0787c3829f49c0d5958c40ec7563b42c406a9a9b0c2fd0ca50dc5fb5a', 'image-source skill with H2 setup, approved shape transport and 2026-10-08 connector policy, web-app Creative rules sentence removed');
 });

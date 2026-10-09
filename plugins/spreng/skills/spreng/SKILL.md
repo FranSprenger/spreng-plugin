@@ -5,7 +5,7 @@ description: Spreng router and first-run guide. Use when the user mentions Spren
 
 # Spreng
 
-For images, the connector always sends the Prompt Plate plus your own inputs. The web app keeps its own Creative rules setting. Prompt handling still lets you choose AI art direction or exact template.
+For images, the connector always sends the Prompt Plate plus your own inputs. Prompt handling still lets you choose AI art direction or exact template.
 Spreng keeps each client's offer, saved research, angles and Prompt Plates in the user's Spreng account.
 The `spreng` connector (`https://app.spreng.io/mcp`) prepares each step from that account and saves the
 text, plans and image completion records back. Image files stay with the host when the account keeps no

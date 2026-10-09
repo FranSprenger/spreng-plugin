@@ -5,7 +5,7 @@ description: Image step for Spreng in Claude Code. Use when a Spreng claim (clai
 
 # Image source for Spreng (Claude Code)
 
-For images, the connector always sends the Prompt Plate plus your own inputs. The web app keeps its own Creative rules setting. Prompt handling still lets you choose AI art direction or exact template.
+For images, the connector always sends the Prompt Plate plus your own inputs. Prompt handling still lets you choose AI art direction or exact template.
 
 Claude Code has no image tool of its own. The `spreng-images` tools make the image through a source the
 user picks once; the choice is remembered on this computer.
