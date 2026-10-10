@@ -35,7 +35,8 @@ methods, comes from the connector at run time, so its answers are the current ve
 | A plate or style they name | `search_prompt_plates` or `get_prompt_plate`, then the row above |
 | Research stages, a research read, angles or ad copy | `prepare_native_text_run` with that kind (call it again with `preparation.resumeArguments` while it answers `preparing: true`), then per unit `claim_native_text_unit`, write the answer, `submit_native_text_answer`; at the end `publish_native_text_run`. After new research the chain is structure, verify, decide_message, mechanism, product, offer, stack, then buyer_read, then angles, then ad_copy (brand_voice needs only saved brand text); `get_workflow` has the current order |
 | New research for a client | `studio_get` with kind sop and slug research-vault gives the record format (the fields `save_record` takes); collect with this assistant's own search and reading tools, then `save_record` with kind research. For sources this assistant cannot open, the optional `spreng-research` add-on has local collectors |
-| Carry on with an earlier run | `list_native_runs` (optionally by `clientId`; pass `next` back as `before` for older runs), then `get_native_run`; for a known text run, `get_native_text_run`. Use `get_saved_images` only when the served workflow offers Gallery |
+| Carry on with earlier image work | `list_native_runs` (optionally by `clientId`; pass `next` back as `before` for older runs), then `get_native_run`. Use `get_saved_images` only when the served workflow offers Gallery |
+| Carry on with earlier research, stages, angles or copy | `list_native_text_runs` (optionally by `clientId`; pass `next` back as `before` for older runs), then `get_native_text_run` |
 | Edit offer details or brand basics | `get_client`, then `update_client` with only the requested fields; report the returned saved state |
 | Add or replace a logo or product photo | `create_brand_asset_upload` (keep `operationId` for retries; `replaces` is the saved file URL for replacement), PUT bytes to its `signedUrl` using the returned `contentType` and `maxBytes`, then `save_brand_asset` with the returned `path`, same `clientId` and `kind`. Retry a failed PUT at the same URL |
 | Remove a product photo | `get_client`, then `remove_product_photo` with its saved photo URL |
@@ -66,8 +67,7 @@ completion is recorded; the host keeps the image and there is no Gallery copy. F
   Use `codex login status` to check sign-in. The add-on's source status checks configuration only; it does not verify sign-in or image capability.
   Confirm this Codex installation supports image generation before a claim, then call `studio_start` with `imageSource: codex_cli`.
   This uses their existing Codex account, subject to its limits; no Spreng purchase is required. Do not suggest a billed API source by default.
-- Alternatively, finish in an image-capable Codex or ChatGPT session: `list_native_runs`, then `get_native_run` with the saved run id.
-  Generate only unclaimed images; keep an already-started image for recovery instead of claiming or generating it again.
+- Alternatively, finish the saved image run in an image-capable Codex or ChatGPT session: `list_native_runs`, then `get_native_run` with the saved run id. Generate only unclaimed images; keep an already-started image for recovery instead of claiming or generating it again.
 
 ## 4. What goes where
 
