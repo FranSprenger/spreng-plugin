@@ -100,7 +100,7 @@ export async function saveMedia(ads, dir, { fetch = globalThis.fetch, sleep = (m
 
 /** The research source file for these ads (the recipe's `research/sources/<id>.json` shape). */
 export function sourceResult(ads, { url, notes = [], retrievedAt = new Date().toISOString() } = {}) {
-  const result = { id: 'meta-ads', label: 'Meta Ad Library (logged out, first batch)', kind: 'ads', status: 'ok', retrievedAt, url, competitors: [] };
+  const result = { id: 'meta-ads', label: 'Meta Ad Library (logged out, first batch)', kind: 'ad_library', status: 'ok', retrievedAt, url, competitors: [] };
   if (!ads.length) return { ...result, status: 'failed', reason: notes[0] || 'no ads could be read from the Ad Library page' };
   const byPage = new Map();
   for (const ad of ads) {

@@ -39,8 +39,13 @@ asks to use their own source. Keep an existing source choice unless the user ask
    answers `uploadNeeded: false`, skip the upload and keep the file here. Call `finalize_native_image`
    with `assetId`, `actualPrompt` and `host`; use the add-on's returned `actualPrompt` when present. A receipt records completion without a Gallery copy.
 
+After a dropped reply, call `recover_image` with the claim id as `operationId` in the same project.
+It restores an already-made image from its local receipt: no prompt, reference links or provider call
+is needed. Do not replay `make_image` with refreshed reference links to recover that image. If there is
+no completed receipt, recovery reports the saved state and sends nothing.
+
 One `operationId` buys at most one image in each project, with every source except other. `make_image` records the request
-on this computer before calling Codex, OpenAI or KIE; the same `operationId` again returns the image already made, collects a KIE task already
-accepted (as does `kieTaskId`), or repeats an unclear or failed outcome, and never pays again. When it
+on this computer before calling Codex, OpenAI or KIE; an identical request can return the completed image,
+collect a KIE task already accepted (as does `kieTaskId`), or repeat an unclear or failed outcome. When it
 reports an unclear outcome, tell the user and do not ask for that image again without their go-ahead; a
 new image needs a new `operationId`.

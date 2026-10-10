@@ -82,7 +82,7 @@ export async function transcribeDir(dir, deps = {}) {
     for (const saved of (ad.saved || []).filter((s) => s.kind === 'video')) {
       try {
         const text = await transcribe(saved.file, tools, deps);
-        if (text) { result.documents.push({ title: `Ad ${ad.id} video (${ad.page})`, kind: 'transcript', text: text.slice(0, 20000), url: `https://www.facebook.com/ads/library/?id=${ad.id}` }); n++; }
+        if (text) { result.documents.push({ title: `Ad ${ad.id} video (${ad.page})`, kind: 'transcript', text, url: `https://www.facebook.com/ads/library/?id=${ad.id}` }); n++; }
       } catch (e) { notes.push(e.message); }
     }
   }

@@ -4,6 +4,8 @@
 // one slower retry, no more. Returns one source result for research.mjs. A network error on the search feed throws
 // (research.mjs records it as failed); one on a thread is recorded in the reason and the other threads are kept.
 
+import { addQuote } from './quote.mjs';
+
 const decode = (s) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
 const clean = (s) => decode(decode(s).replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
 
@@ -39,17 +41,17 @@ export async function reddit({ query, threads = 3, pace = 60000 }, { fetch = glo
   if (search.error) return { ...result, status: [401, 403, 429].includes(search.code) ? 'blocked' : 'failed', reason: search.error };
   const posts = search.list.filter((e) => /\/comments\//.test(e.link));
   result.url = `https://www.reddit.com/search/?q=${encodeURIComponent(query)}`;
-  const quote = (e, link) => ({ text: [e.title, e.text].filter(Boolean).join(': ').slice(0, 4000), url: link, speaker: e.author || undefined, context: e.date ? `Reddit, ${e.date}` : 'Reddit' });
+  const quote = (e, link) => ({ text: [e.title, e.text].filter(Boolean).join(': '), url: link, speaker: e.author || undefined, context: e.date ? `Reddit, ${e.date}` : 'Reddit' });
   const failed = [];
   for (const post of posts.slice(0, threads)) {
     await sleep(pace);
     const url = `${post.link.replace(/\/?$/, '/')}.rss`;
     // A network error on one thread is recorded like an HTTP error; what was read before it is kept.
     const thread = await read(url).catch((e) => ({ error: `${url}: ${String(e?.message || e)}` }));
-    if (thread.error) { failed.push(thread.error); result.quotes.push(quote(post, post.link)); continue; }
+    if (thread.error) { failed.push(thread.error); addQuote(result, quote(post, post.link)); continue; }
     const [op, ...comments] = thread.list;
-    result.quotes.push(quote(op || post, post.link));
-    for (const c of comments) if (c.text) result.quotes.push(quote({ ...c, title: '' }, c.link || post.link));
+    addQuote(result, quote(op || post, post.link));
+    for (const c of comments) if (c.text) addQuote(result, quote({ ...c, title: '' }, c.link || post.link));
   }
   if (!posts.length) result.reason = 'the search feed returned no posts';
   else if (failed.length) result.reason = `${Math.min(posts.length, threads) - failed.length} of ${Math.min(posts.length, threads)} threads read; ${failed.join('; ')}`.slice(0, 500);

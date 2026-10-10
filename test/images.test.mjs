@@ -531,5 +531,5 @@ test('model-facing wording: the spreng-images tool descriptions and the image-so
   // LOOP-99 R2 (chair, 2026-10-09): the sentence about the web app's own Creative rules setting was removed; plugin
   // users are on the connector, where it does not apply. Removal only, no new wording.
   assert.match(String(skill), /connector always sends the Prompt Plate plus your own inputs\. Prompt handling/);
-  assert.equal(hash(skill), '20ce59c0787c3829f49c0d5958c40ec7563b42c406a9a9b0c2fd0ca50dc5fb5a', 'image-source skill with H2 setup, approved shape transport and 2026-10-08 connector policy, web-app Creative rules sentence removed');
+  assert.equal(hash(skill), 'c74986f8d3cc8e006d0911de89dedab2d4953bd5e9f0adfaa3b0153c86d40ded', 'image-source skill with H2 setup, approved shape transport, connector policy and R7-fable-05 local recovery guidance');
 });

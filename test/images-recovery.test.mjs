@@ -5,6 +5,16 @@ import os from 'node:os';
 import path from 'node:path';
 import { callTool, TOOLS } from '../plugins/spreng-images/server/server.mjs';
 import { reserveOperation, updateOperation, JOURNAL_DIR } from '../plugins/spreng-images/server/operations.mjs';
+import { read } from './helpers.mjs';
+
+test('R7-fable-05: image skill routes dropped replies to receipt recovery with only the claim id', () => {
+  const skill = read('plugins/spreng-images/skills/image-source/SKILL.md');
+  assert.match(skill, /dropped reply[\s\S]*`recover_image`[\s\S]*claim id[\s\S]*`operationId`/);
+  assert.match(skill, /no prompt, reference links or provider call/i);
+  assert.match(skill, /(?:fresh|refreshed) reference links/);
+  assert.match(skill, /no completed receipt[\s\S]*state[\s\S]*nothing/i);
+  assert.doesNotMatch(skill, /the same `operationId` again returns the image already made/);
+});
 
 async function fixture(t) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'spreng-recovery-'));

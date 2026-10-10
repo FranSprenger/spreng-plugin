@@ -3,6 +3,8 @@
 // the page's own comment request. Returns one source result for research.mjs. A network error on the search page throws
 // (research.mjs records it as failed); one on a video is recorded in the reason and the other videos are kept.
 
+import { addQuote } from './quote.mjs';
+
 /** The JSON object assigned to `name` in a YouTube page (ytInitialData and similar), or null. */
 export function pageJson(html, name) {
   const at = html.indexOf(`${name} = `);
@@ -66,7 +68,7 @@ export async function youtubeComments({ query, videos = 2, pace = 3000 }, { fetc
     try { body = await c.json(); } catch { notes.push(`unreadable comment reply for ${url}`); return; }
     let texts = findAll(body, 'commentEntityPayload').map((p) => p?.properties?.content?.content).filter(Boolean);
     if (!texts.length) texts = findAll(body, 'commentRenderer').map((p) => (p?.contentText?.runs || []).map((x) => x.text).join('')).filter(Boolean);
-    for (const text of texts) result.quotes.push({ text: text.slice(0, 4000), url, context: `YouTube comment on "${video.title}"`.slice(0, 1000) });
+    for (const text of texts) addQuote(result, { text, url, context: `YouTube comment on "${video.title}"`.slice(0, 1000) });
     if (!texts.length) notes.push(`no comments returned for ${url}`);
   }
   for (const video of found.sort((a, b) => b.views - a.views).slice(0, videos)) {
