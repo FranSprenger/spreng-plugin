@@ -221,3 +221,18 @@ test('the skill claims no unverified command form and promises no research metho
   assert.doesNotMatch(skill, /research method/i);
   assert.match(skill, /`studio_get` with kind sop and slug research-vault gives the record format/);
 });
+
+// LOOP-99 (R3-fable-06, DIAG-R3 A): the router names the research chain in the connector's order, buyer_read included,
+// because angles and ad copy read the newest completed buyer read and the connector's chain otherwise never makes one.
+test('the skill names the research chain in the served order, buyer read before angles and ad copy', () => {
+  const skill = read(`${P}/skills/spreng/SKILL.md`);
+  const line = skill.split('\n').find((l) => /\bstructure\b.*\bstack\b/.test(l));
+  assert.ok(line, 'a line names the research chain');
+  const chain = line.slice(line.search(/\bstructure\b/));
+  const order = ['structure', 'verify', 'decide_message', 'mechanism', 'product', 'offer', 'stack', 'buyer_read', 'angles', 'ad_copy']
+    .map((k) => chain.search(new RegExp(`\\b${k}\\b`)));
+  assert.ok(order.every((i) => i >= 0), `every kind is named: ${order}`);
+  assert.deepEqual([...order].sort((a, b) => a - b), order, 'named in the served order');
+  assert.match(chain, /brand_voice/);
+  assert.match(chain, /`get_workflow`/);
+});
