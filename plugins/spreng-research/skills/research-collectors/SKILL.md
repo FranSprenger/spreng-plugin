@@ -7,9 +7,11 @@ description: Local research collectors for Spreng. Use when a Spreng research ru
 
 SCRIPTS is this plugin's `scripts/` folder: `${CLAUDE_PLUGIN_ROOT}/scripts` in Claude Code; elsewhere
 the `scripts/` folder two levels above this file. Each script reads public pages logged out and writes
-one source file into the folder given as `--out`, normally `<project>/research/sources/`, in the shape
-the Spreng research method reads. The method itself comes from the Spreng connector. In Codex the
-scripts need network access: ask the user to allow it.
+one source file into the folder given as `--out`, normally `<project>/research/sources/`. The Spreng
+connector does not read these files: save the findings for the client with its `save_record` with kind
+research (`studio_get` with kind sop and slug research-vault lists the fields): one `sources[]` entry per
+feed or page read, posts, comments and transcripts as `quotes[]` with that `sourceId`, ads as
+`competitors[].ads[]`. In Codex the scripts need network access: ask the user to allow it.
 
 | Source | Command | Notes |
 |---|---|---|

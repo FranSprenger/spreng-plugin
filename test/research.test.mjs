@@ -169,3 +169,13 @@ test('README discloses every host the research scripts fetch', () => {
     assert.ok(readme.includes(h) || readme.includes(base), `README does not disclose ${h}`);
   }
 });
+
+// LOOP-99 R4-fable-04: the connector takes research only through save_record (no tool reads the collectors' files), so
+// the skill names that save step and the record fields each file's content goes into, and claims no direct read.
+test('the collectors skill names the save step into connector research, not a method that reads its files', () => {
+  const skill = read('plugins/spreng-research/skills/research-collectors/SKILL.md');
+  assert.doesNotMatch(skill, /shape the Spreng research method reads/);
+  assert.match(skill, /`?save_record`?\s+with\s+kind\s+research/);
+  assert.match(skill, /`?studio_get`?\s+with\s+kind\s+sop\s+and\s+slug\s+research-vault/);
+  for (const field of ['sources[]', 'quotes[]', 'sourceId', 'competitors[].ads[]']) assert.ok(skill.includes(field), field);
+});
