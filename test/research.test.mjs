@@ -179,3 +179,33 @@ test('the collectors skill names the save step into connector research, not a me
   assert.match(skill, /`?studio_get`?\s+with\s+kind\s+sop\s+and\s+slug\s+research-vault/);
   for (const field of ['sources[]', 'quotes[]', 'sourceId', 'competitors[].ads[]']) assert.ok(skill.includes(field), field);
 });
+
+test('R6-ASTRA2-02: full transcripts use documents with source identity; quotes contain excerpts', () => {
+  const skill = read('plugins/spreng-research/skills/research-collectors/SKILL.md');
+  assert.match(skill, /full transcripts as `documents\[\]` with `kind: "transcript"` and (?:that|the) `sourceId`/);
+  assert.match(skill, /excerpts as `quotes\[\]` with (?:that|the) `sourceId`/);
+});
+
+test('R6-ASTRA2-02: the collector keeps a transcript longer than the quote field limit whole', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'stt-long-'));
+  try {
+    const transcript = 'A customer explains how they use this product. '.repeat(120).trim();
+    assert.ok(transcript.length > 4000);
+    await fs.writeFile(path.join(dir, 'meta-ads.json'), JSON.stringify({ id: 'meta-ads', status: 'ok' }));
+    await fs.writeFile(path.join(dir, 'meta-ads-raw.json'), JSON.stringify([
+      { id: '11', page: 'Example Brand', saved: [{ kind: 'video', file: path.join(dir, '11.mp4') }] },
+    ]));
+    await transcribeDir(dir, {
+      tools: { whisper: 'whisper-cli', ffmpeg: 'ffmpeg', model: '/synthetic-model.bin', missing: [] }, tmp: dir,
+      run: async (cmd, args) => {
+        if (cmd === 'whisper-cli') await fs.writeFile(`${args[args.indexOf('-of') + 1]}.txt`, transcript);
+        return { code: 0, stdout: '', stderr: '' };
+      },
+    });
+    const saved = JSON.parse(await fs.readFile(path.join(dir, 'meta-ads.json'), 'utf8'));
+    assert.equal(saved.documents[0].kind, 'transcript');
+    assert.equal(saved.documents[0].text, transcript);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
