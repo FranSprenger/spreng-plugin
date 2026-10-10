@@ -249,3 +249,9 @@ test('the skill names the research chain in the served order, buyer read before 
   assert.match(chain, /brand_voice/);
   assert.match(chain, /`get_workflow`/);
 });
+
+test('R10-FABLE-03: brand document and person photo routes cover upload, list and removal', () => {
+  const row = read(`${P}/skills/spreng/SKILL.md`).split('\n').find((line) => line.startsWith('| Add, list or remove a brand document or person photo |'));
+  assert.ok(row);
+  for (const text of ['create_brand_asset_upload', 'brand_document', 'person_photo', 'PUT', 'save_brand_asset', 'list_brand_attachments', 'remove_brand_attachment', 'listed path']) assert.ok(row.includes(text), text);
+});
