@@ -16,6 +16,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { documentExcerpt } from './sources/excerpt.mjs';
 
 export function runProcess(cmd, args) {
   return new Promise((resolve) => {
@@ -56,9 +57,9 @@ export async function transcribe(file, tools, { run = runProcess, tmp = os.tmpdi
   const base = path.join(tmp, `spreng-stt-${path.basename(file).replace(/\W+/g, '-')}-${process.pid}`);
   const wav = `${base}.wav`;
   const conv = await run(tools.ffmpeg, ['-y', '-loglevel', 'error', '-i', file, '-ar', '16000', '-ac', '1', wav]);
-  if (conv.code !== 0) throw new Error(`ffmpeg could not read ${file}: ${conv.stderr.trim().slice(-300)}`);
+  if (conv.code !== 0) throw new Error(`ffmpeg could not read ${file}: ${conv.stderr.trim()}`);
   const stt = await run(tools.whisper, ['-m', tools.model, '-f', wav, '-l', 'auto', '-nt', '-np', '-otxt', '-of', base]);
-  if (stt.code !== 0) throw new Error(`whisper-cli failed on ${file}: ${stt.stderr.trim().slice(-300)}`);
+  if (stt.code !== 0) throw new Error(`whisper-cli failed on ${file}: ${stt.stderr.trim()}`);
   const text = (await fs.readFile(`${base}.txt`, 'utf8')).replace(/\s+/g, ' ').trim();
   await Promise.all([fs.rm(wav, { force: true }), fs.rm(`${base}.txt`, { force: true })]);
   return text;
@@ -69,8 +70,10 @@ export async function transcribeDir(dir, deps = {}) {
   const tools = deps.tools || await findTools();
   const resultPath = path.join(dir, 'meta-ads.json');
   const result = JSON.parse(await fs.readFile(resultPath, 'utf8'));
+  if (result.kind === 'ads') result.kind = 'ad_library';
   if (tools.missing?.length) {
-    result.reason = [result.reason, `video transcripts skipped: this computer has no ${tools.missing.join(', ')}`].filter(Boolean).join('; ').slice(0, 1000);
+    const reason = [result.reason, `video transcripts skipped: this computer has no ${tools.missing.join(', ')}`].filter(Boolean).join('; ');
+    result.reason = documentExcerpt(result, reason, 1000, 'Meta Ad Library diagnostics', result.url);
     await fs.writeFile(resultPath, JSON.stringify(result, null, 2));
     return { transcribed: 0, skipped: tools.missing };
   }
@@ -86,7 +89,7 @@ export async function transcribeDir(dir, deps = {}) {
       } catch (e) { notes.push(e.message); }
     }
   }
-  if (notes.length) result.reason = [result.reason, ...notes].join('; ').slice(0, 1000);
+  if (notes.length) result.reason = documentExcerpt(result, [result.reason, ...notes].filter(Boolean).join('; '), 1000, 'Meta Ad Library diagnostics', result.url);
   await fs.writeFile(resultPath, JSON.stringify(result, null, 2));
   return { transcribed: n, failed: notes.length };
 }

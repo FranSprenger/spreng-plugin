@@ -17,6 +17,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { documentExcerpt } from './sources/excerpt.mjs';
 
 export const LIBRARY = 'https://www.facebook.com/ads/library/';
 
@@ -101,14 +102,18 @@ export async function saveMedia(ads, dir, { fetch = globalThis.fetch, sleep = (m
 /** The research source file for these ads (the recipe's `research/sources/<id>.json` shape). */
 export function sourceResult(ads, { url, notes = [], retrievedAt = new Date().toISOString() } = {}) {
   const result = { id: 'meta-ads', label: 'Meta Ad Library (logged out, first batch)', kind: 'ad_library', status: 'ok', retrievedAt, url, competitors: [] };
-  if (!ads.length) return { ...result, status: 'failed', reason: notes[0] || 'no ads could be read from the Ad Library page' };
+  if (!ads.length) {
+    result.status = 'failed';
+    result.reason = documentExcerpt(result, notes.join('; ') || 'no ads could be read from the Ad Library page', 1000, 'Meta Ad Library diagnostics', url);
+    return result;
+  }
   const byPage = new Map();
   for (const ad of ads) {
     const key = ad.pageId || ad.page;
     if (!byPage.has(key)) byPage.set(key, { name: ad.page || key, url: ad.pageId ? libraryUrl({ pageId: ad.pageId }) : url, ads: [] });
     byPage.get(key).ads.push({
       headline: ad.title || undefined,
-      text: ad.body || undefined,
+      text: documentExcerpt(result, ad.body, 8000, `Ad ${ad.id} text`, `${LIBRARY}?id=${ad.id}`) || undefined,
       format: ad.format || undefined,
       url: `${LIBRARY}?id=${ad.id}`,
       firstSeen: ad.start,
@@ -116,7 +121,8 @@ export function sourceResult(ads, { url, notes = [], retrievedAt = new Date().to
   }
   result.competitors = [...byPage.values()];
   const reason = [`first batch only: ${ads.length} ads (Meta rate-limits "See more" for logged-out visitors)`, ...notes].join('; ');
-  return { ...result, reason: reason.slice(0, 1000) };
+  result.reason = documentExcerpt(result, reason, 1000, 'Meta Ad Library diagnostics', url);
+  return result;
 }
 
 async function loadPlaywright(env = process.env) {

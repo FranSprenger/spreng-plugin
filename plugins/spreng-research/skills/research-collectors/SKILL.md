@@ -13,7 +13,8 @@ research (`studio_get` with kind sop and slug research-vault lists the fields): 
 feed or page read; full transcripts as `documents[]` with `kind: "transcript"` and that `sourceId`;
 posts, comments and transcript excerpts as `quotes[]` with that `sourceId`; ads as `competitors[].ads[]`.
 Long quotes are labelled excerpts; their full posts and comments are retained in `documents[]` with
-`kind: "other"`. Save those documents with that `sourceId` too. If the served schema's document or
+`kind: "other"`. Long ad text and diagnostic reasons are labelled excerpts too; full ad text and
+full diagnostics are retained in `documents[]`. Save those documents with that `sourceId` too. If the served schema's document or
 record limits require a split, save consecutive text parts with the same `part.group`, sequential
 `part.index` and complete `part.total`, keeping the `sourceId`, URL and text order in every part.
 In Codex the scripts need network access: ask the user to allow it.
