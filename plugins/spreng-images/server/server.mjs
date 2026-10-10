@@ -12,7 +12,7 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { SOURCES, secret, runCodex, runOpenAI, runKie, runOther } from './routes.mjs';
-import { canonicalPath, DEFAULT_MODELS, JOURNAL_DIR } from './operations.mjs';
+import { canonicalPath, DEFAULT_MODELS, JOURNAL_DIR, recoverOperation } from './operations.mjs';
 
 /** Run a program without a shell; resolves with its exit code and output. */
 export function runProcess(cmd, args, { timeoutMs } = {}) {
@@ -85,6 +85,13 @@ export const TOOLS = [
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
   {
+    name: 'recover_image',
+    title: 'Recover a completed image',
+    description: 'Recovers a completed image by operationId in this project from its saved receipt. No prompt, reference links or provider call is needed.',
+    inputSchema: { type: 'object', properties: { operationId: { type: 'string', minLength: 1 } }, required: ['operationId'], additionalProperties: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  {
     name: 'make_image',
     title: 'Make one image with the chosen source',
     description: 'Makes one image from the prompt as given with the image source the user chose, and saves the file on this computer. Uses the user\'s own Codex plan or their own OpenAI or KIE account, which may cost them on that account. One operationId buys at most one image in each project: the same operationId again in that project returns what is kept instead of paying again, and an unclear outcome is reported, not retried. Then follow the Spreng claim’s next step: finalize_native_image records completion; upload only when the served steps return a signed upload URL.',
@@ -130,6 +137,14 @@ export async function callTool(name, args = {}, deps = defaultDeps()) {
     const saved = { source: args.source, ...(args.otherName ? { otherName: String(args.otherName).slice(0, 200) } : {}), savedAt: deps.now().toISOString() };
     await deps.fs.writeFile(path.join(dir, 'image-source.json'), JSON.stringify(saved, null, 2));
     return { saved: saved.source, otherName: saved.otherName };
+  }
+  if (name === 'recover_image') {
+    if (typeof args.operationId !== 'string' || !args.operationId.trim()) throw new Error('operationId is required.');
+    return recoverOperation(deps, {
+      operationId: args.operationId,
+      projectDir: await canonicalPath(deps.fs, projectDir(env)),
+      stateDir: path.join(dataDir(env), JOURNAL_DIR),
+    });
   }
   if (name === 'make_image') {
     const choice = await readChoice(deps);

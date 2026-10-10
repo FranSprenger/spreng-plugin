@@ -163,7 +163,7 @@ export async function reserveOperation(deps, { job, model, fingerprint, provider
   const legacy = saved.provider === provider && saved.model === model && saved.fingerprint === legacyFingerprint;
   if (saved.fingerprint !== fingerprint && !legacy) {
     if (saved.provider !== provider || saved.model !== model) throw sentElsewhere(saved, provider, model);
-    throw new Error(`Operation ${operationId} was already used for a different image request; nothing was sent. Use a new operationId for a new image.`);
+    throw new Error(`Operation ${operationId} was already used for a different image request; nothing was sent. recover_image with this operationId retrieves an already-made image. Use a new operationId for a new image.`);
   }
   return { fresh: false, file, record: saved, operationId, provider, legacy };
 }
@@ -245,4 +245,20 @@ export async function replayOperation(deps, op) {
   }
   const why = r.state === 'uncertain' && r.reason ? ` (${r.reason})` : '';
   throw new Error(`Operation ${op.operationId} was sent to ${r.provider || op.provider} at ${r.reservedAt} and is in progress in another call, or its outcome is unclear${why}. It was not sent again, so nothing more is charged. Check your ${r.provider || op.provider} account; for a new image use a new operationId.`);
+}
+
+/** Local receipt lookup, independent of the original prompt, expiring reference links and source configuration. */
+export async function recoverOperation(deps, { stateDir, projectDir, operationId }) {
+  const file = recordFile(stateDir, projectDir || null, operationId);
+  const record = await readRecord(deps, file);
+  if (!record) return {
+    operationId, state: record === undefined ? 'not_found' : 'unreadable', recovered: false,
+    warning: 'No completed image receipt could be read in this project.',
+  };
+  if (record.state !== 'completed') return {
+    operationId, state: record.state, recovered: false,
+    ...(record.taskId ? { taskId: record.taskId } : {}),
+    warning: 'This operation has no completed image receipt yet. Nothing was sent.',
+  };
+  return replayOperation(deps, { file, record, operationId, provider: record.provider });
 }

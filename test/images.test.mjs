@@ -527,7 +527,7 @@ test('model-facing wording: the spreng-images tool descriptions and the image-so
   assert.doesNotMatch(make.inputSchema.properties.operationId.description, /switching source/);
   const skill = await fs.readFile(path.join(ROOT, 'plugins/spreng-images/skills/image-source/SKILL.md'));
   assert.doesNotMatch(String(skill), /also after switching source/);
-  assert.equal(hash(JSON.stringify(TOOLS)), 'deb0538b46f12104ab643cf852df707afdb84f62defd3da14a77ca155006718c', 'tool descriptions with owner-delegated format transport 2026-10-07');
+  assert.equal(hash(JSON.stringify(TOOLS)), '56c590185ed158df70d8840b8079e7f14e016606ab8922fa279e53ced9ee6f89', 'tool descriptions with R6-ASTRA2-07 local receipt recovery');
   // LOOP-99 R2 (chair, 2026-10-09): the sentence about the web app's own Creative rules setting was removed; plugin
   // users are on the connector, where it does not apply. Removal only, no new wording.
   assert.match(String(skill), /connector always sends the Prompt Plate plus your own inputs\. Prompt handling/);
