@@ -139,6 +139,19 @@ test('the skill names only connector tools and carries no method text', () => {
   assert.ok(skill.split('\n').length < 80, 'router stays short');
 });
 
+test('R9-FABLE-05: sign-in routes claude.ai through its custom connector setup', () => {
+  const skill = read(`${P}/skills/spreng/SKILL.md`);
+  const claude = skill.split('\n').find((line) => line.includes('claude.ai:'));
+  assert.ok(claude, 'claude.ai has its own setup instructions');
+  assert.match(claude, /Customize > Connectors > (?:\+ Add > )?Add custom connector/);
+  assert.ok(claude.includes(MCP_URL), 'the custom connector uses the native endpoint');
+  assert.match(claude, /Sign in now/);
+  assert.doesNotMatch(claude, /Connect button on the plugin/);
+  assert.match(skill, /Codex app and ChatGPT: the Connect button on the plugin\./);
+  assert.match(skill, /Codex CLI: `codex mcp login spreng`/);
+  assert.match(skill, /Claude Code: run `\/mcp`, pick `spreng`, sign in\./);
+});
+
 test('image review cases use receipt completion without generated-image uploads', () => {
   const cases = json(`${P}/plugin.json`).extensions['com.openai'].review.test_cases.positive;
   const imageCases = cases.filter((c) => c.tools_triggered.includes('claim_native_image'));

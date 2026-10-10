@@ -14,10 +14,10 @@ methods, comes from the connector at run time, so its answers are the current ve
 
 ## 1. First run
 
-1. Check that the `spreng` tools are in this session (`get_workflow`, `list_clients`). If they are not,
-   the connector is not signed in yet:
+1. Check that the `spreng` tools are in this session (`get_workflow`, `list_clients`). If they are not, the connector is not signed in yet:
    - Claude Code: run `/mcp`, pick `spreng`, sign in. The browser opens app.spreng.io to approve.
-   - Codex CLI: `codex mcp login spreng`. Codex app, ChatGPT, claude.ai: the Connect button on the plugin.
+   - Codex CLI: `codex mcp login spreng`. Codex app and ChatGPT: the Connect button on the plugin.
+   - claude.ai: Customize > Connectors > + Add > Add custom connector. Name it Spreng, enter https://app.spreng.io/mcp, click Continue twice, then Sign in now and Add. Sign in to Spreng and approve your organization.
    Then start again from step 2.
 2. Call `get_workflow`. It returns the steps, what is available today and what is not yet. Where it
    differs from this file, use its order.
