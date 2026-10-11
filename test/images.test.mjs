@@ -527,9 +527,9 @@ test('model-facing wording: the spreng-images tool descriptions and the image-so
   assert.doesNotMatch(make.inputSchema.properties.operationId.description, /switching source/);
   const skill = await fs.readFile(path.join(ROOT, 'plugins/spreng-images/skills/image-source/SKILL.md'));
   assert.doesNotMatch(String(skill), /also after switching source/);
-  assert.equal(hash(JSON.stringify(TOOLS)), '56c590185ed158df70d8840b8079e7f14e016606ab8922fa279e53ced9ee6f89', 'tool descriptions with R6-ASTRA2-07 local receipt recovery');
+  assert.equal(hash(JSON.stringify(TOOLS)), 'ad52c15a1370d3894747af25db509070a38afe6ead71019cda05932b838781b0', 'tool descriptions with R6-ASTRA2-07 local receipt recovery; R14-astra-04 operationId names the claim assetId');
   // LOOP-99 R2 (chair, 2026-10-09): the sentence about the web app's own Creative rules setting was removed; plugin
   // users are on the connector, where it does not apply. Removal only, no new wording.
   assert.match(String(skill), /connector always sends the Prompt Plate plus your own inputs\. Prompt handling/);
-  assert.equal(hash(skill), 'c74986f8d3cc8e006d0911de89dedab2d4953bd5e9f0adfaa3b0153c86d40ded', 'image-source skill with H2 setup, approved shape transport, connector policy and R7-fable-05 local recovery guidance');
+  assert.equal(hash(skill), '4ea6f982ab8c79150660f4c534d5d678070572b85a2dba7ec574cc6ff8469049', 'image-source skill with H2 setup, approved shape transport, connector policy, R7-fable-05 local recovery guidance and R14-astra-04 assetId naming');
 });

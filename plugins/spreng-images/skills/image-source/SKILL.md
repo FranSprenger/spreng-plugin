@@ -30,7 +30,7 @@ asks to use their own source. Keep an existing source choice unless the user ask
    the source as ready.
 3. Follow the claim's `promptHandling` for the creative text, including its existing art-direction step
    when requested. Call `make_image` with that text as `prompt`, the claim's reference links as
-   `references`, its `imageToolSettings.requestedSize` as `requestedSize`, and the claim id as `operationId`.
+   `references`, its `imageToolSettings.requestedSize` as `requestedSize`, and the claim's `assetId` as `operationId`.
    The Codex route carries the approved format-only suffix and returns `actualPrompt`, the file path,
    and `dimensionCheck` from the returned image header. Report any mismatch; do not generate a replacement automatically.
    For `other`, follow the `next` text it returns.
@@ -39,7 +39,7 @@ asks to use their own source. Keep an existing source choice unless the user ask
    answers `uploadNeeded: false`, skip the upload and keep the file here. Call `finalize_native_image`
    with `assetId`, `actualPrompt` and `host`; use the add-on's returned `actualPrompt` when present. A receipt records completion without a Gallery copy.
 
-After a dropped reply, call `recover_image` with the claim id as `operationId` in the same project.
+After a dropped reply, call `recover_image` with the claim's `assetId` as `operationId` in the same project.
 It restores an already-made image from its local receipt: no prompt, reference links or provider call
 is needed. Do not replay `make_image` with refreshed reference links to recover that image. If there is
 no completed receipt, recovery reports the saved state and sends nothing.

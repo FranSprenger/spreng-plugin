@@ -105,7 +105,7 @@ export const TOOLS = [
         aspectRatio: { type: 'string', description: 'For KIE, such as 1:1 or 9:16.' },
         size: { type: 'string', description: 'For OpenAI, such as 1024x1024 or auto.' },
         kieTaskId: { type: 'string', description: 'Collect a KIE task that was still running, instead of starting a new one.' },
-        operationId: { type: 'string', description: 'Names this image purchase; pass the Spreng claim id. One operationId buys at most one image in each project: the same operationId again in that project returns the image already made (or collects the KIE task already accepted, or reports an unclear or failed outcome) and never pays again. For another image, use a new operationId. Without one, the same request in the same project is treated as the same operation.' },
+        operationId: { type: 'string', description: 'Names this image purchase; pass the assetId from the Spreng claim. One operationId buys at most one image in each project: the same operationId again in that project returns the image already made (or collects the KIE task already accepted, or reports an unclear or failed outcome) and never pays again. For another image, use a new operationId. Without one, the same request in the same project is treated as the same operation.' },
       },
       required: ['prompt'],
       additionalProperties: false,
