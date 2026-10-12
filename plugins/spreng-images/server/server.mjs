@@ -16,9 +16,9 @@ import { canonicalPath, DEFAULT_MODELS, JOURNAL_DIR, recoverOperation } from './
 import { checkImageReadiness } from './readiness.mjs';
 
 /** Run a program without a shell; resolves with its exit code and output. */
-export function runProcess(cmd, args, { timeoutMs } = {}) {
+export function runProcess(cmd, args, { timeoutMs, cwd, env } = {}) {
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(cmd, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     let started = false;

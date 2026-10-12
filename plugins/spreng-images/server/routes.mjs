@@ -18,6 +18,7 @@
 // charged twice for one image. Another image needs a new operation id.
 
 import path from 'node:path';
+import { codexLaunch } from './codex-launch.mjs';
 import { requestedFormat, formatPrompt, dimensionReceipt } from './image-format.mjs';
 import {
   fingerprintOf, requestFingerprint, snapshotReferences, reserveOperation, updateOperation, releaseOperation, markUncertain, markFailed,
@@ -118,10 +119,12 @@ export async function runCodex(job, deps) {
   const imagesDir = path.join(codexHome, 'generated_images');
   let before;
   let args;
+  let launch;
   try {
     before = new Set(await listImages(imagesDir, deps.fs));
     const refs = await localRefs(snap.refs, tmpDir, deps);
-    args = ['exec', '--skip-git-repo-check', '--sandbox', 'read-only', '--json', '-C', tmpDir];
+    launch = codexLaunch(deps.env, tmpDir);
+    args = ['exec', '--skip-git-repo-check', '--sandbox', 'read-only', '--json', ...launch.args];
     for (const r of refs) args.push('-i', r);
     args.push(codexTask(prompt, format));
     await deps.fs.mkdir(tmpDir, { recursive: true });
@@ -140,7 +143,7 @@ export async function runCodex(job, deps) {
   };
   let ran;
   try {
-    ran = await deps.run(deps.env.SPRENG_IMAGES_CODEX_BIN || 'codex', args, { timeoutMs: 10 * 60 * 1000 });
+    ran = await deps.run(launch.cmd, args, { ...launch.options, timeoutMs: 10 * 60 * 1000 });
   } catch (e) {
     throw await unclear(`codex exec ended without an answer: ${e.message}`);
   }

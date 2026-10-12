@@ -26,7 +26,9 @@ async function fixture(t, { source = 'codex', auth = 'Logged in using ChatGPT', 
     await fs.writeFile(bin, `#!${process.execPath}
 const fs = require('node:fs');
 const args = process.argv.slice(2);
-fs.appendFileSync(process.env.PROBE_TRACE, JSON.stringify({ args, cwd: process.cwd(), leaked: !!process.env.A8_PARENT_ONLY }) + '\\n');
+const at = args.indexOf('-C');
+const scratch = at < 0 ? null : args.splice(at, 2)[1];
+fs.appendFileSync(process.env.PROBE_TRACE, JSON.stringify({ args, scratch, cwd: process.cwd(), leaked: !!process.env.A8_PARENT_ONLY }) + '\\n');
 ${behavior}
 if (args.join(' ') === 'login status') {
   process.stderr.write(${JSON.stringify(auth)} + '\\n'); process.exit(${authCode});
@@ -98,7 +100,9 @@ test('no_image_capability: the selected runtime explicitly disables image_genera
   const calls = await s.calls();
   assert.deepEqual(calls.map((c) => c.args), [['login', 'status'], ['features', 'list']]);
   assert.equal(calls[0].cwd, calls[1].cwd);
-  assert.ok(calls[0].cwd.startsWith(await fs.realpath(s.deps.env.CLAUDE_PLUGIN_DATA)));
+  assert.equal(calls[0].cwd, process.cwd());
+  assert.equal(calls[0].scratch, calls[1].scratch);
+  assert.equal(path.dirname(calls[0].scratch), path.join(s.deps.env.CLAUDE_PLUGIN_DATA, 'work'));
   assert.deepEqual(await fs.readdir(path.join(s.deps.env.CLAUDE_PLUGIN_DATA, 'work')), []);
 });
 

@@ -1,5 +1,6 @@
 import path from 'node:path';
-import { execFile } from 'node:child_process';
+import { spawn } from 'node:child_process';
+import { codexLaunch } from './codex-launch.mjs';
 import { secret } from './routes.mjs';
 
 // true/false are established facts; null is unknown. Never promote configuration to capability.
@@ -12,11 +13,37 @@ export function readinessState({ installed, signedIn, imageCapability }) {
 
 // These fixed local CLI commands cannot submit an image. Bound both time and captured output;
 // never expose auth-status output, which some login modes include key fragments in.
-function probe(cmd, args, env, cwd) {
+function probe(launch, args) {
   return new Promise((resolve) => {
-    execFile(cmd, args, { env, cwd, encoding: 'utf8', timeout: 2500, killSignal: 'SIGKILL', maxBuffer: 16 * 1024 }, (error, stdout, stderr) => {
-      resolve({ code: error ? (typeof error.code === 'number' ? error.code : -1) : 0,
-        errorCode: error?.code, output: `${stdout}\n${stderr}`.trim() });
+    const child = spawn(launch.cmd, [...launch.args, ...args], {
+      ...launch.options, detached: true, stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    let bytes = 0;
+    let stopped = false;
+    let errorCode;
+    const killGroup = () => {
+      if (!child.pid) return;
+      try { process.kill(-child.pid, 'SIGKILL'); }
+      catch (e) { if (e.code !== 'ESRCH') errorCode = e.code; }
+    };
+    const stop = () => { stopped = true; stdout = ''; stderr = ''; killGroup(); };
+    const timer = setTimeout(stop, 2500);
+    const capture = (data, isStderr) => {
+      if (stopped) return;
+      bytes += data.length;
+      if (bytes > 16 * 1024) { stop(); return; }
+      if (isStderr) stderr += data; else stdout += data;
+    };
+    child.stdout.on('data', (data) => capture(data, false));
+    child.stderr.on('data', (data) => capture(data, true));
+    child.on('error', (e) => { errorCode = e.code; });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      killGroup(); // Also clean up descendants whose wrapper exited without waiting for them.
+      resolve({ code: stopped || errorCode ? -1 : code ?? -1, errorCode,
+        output: `${stdout}\n${stderr}`.trim() });
     });
   });
 }
@@ -40,20 +67,21 @@ export async function checkImageReadiness(choice, deps, dataDir) {
   if (source !== 'codex') {
     return result(source ? 'This source has no local readiness probe.' : 'No image source is selected.');
   }
+  if (process.platform === 'win32') return result('The local check cannot safely contain the Codex process tree on this platform.');
 
   let cwd;
   try {
-    // Match generation's fresh work directory so project-level settings are not mistaken for
-    // the settings of the Codex runtime that make_image will actually launch.
+    // Match generation's launch context, including wrappers that select a profile at startup.
     const workRoot = path.join(dataDir, 'work');
     await deps.fs.mkdir(workRoot, { recursive: true });
     cwd = await deps.fs.mkdtemp(path.join(workRoot, 'readiness-'));
-    const selected = secret(deps.env.SPRENG_IMAGES_CODEX_BIN) || 'codex';
-    const bin = selected.includes(path.sep) ? path.resolve(selected) : selected;
-    const env = { ...deps.env };
-    if (typeof env.PATH === 'string') env.PATH = env.PATH.split(path.delimiter).map((dir) => path.resolve(dir || '.')).join(path.delimiter);
-    const auth = await probe(bin, ['login', 'status'], env, cwd);
+    const launch = codexLaunch(deps.env, cwd);
+    const auth = await probe(launch, ['login', 'status']);
     if (auth.errorCode === 'ENOENT') {
+      // ENOENT can also mean the launch directory disappeared, which proves nothing about Codex.
+      if (!(await deps.fs.stat(launch.options.cwd)).isDirectory() || !(await deps.fs.stat(cwd)).isDirectory()) {
+        return result('The Codex launch context could not be established.');
+      }
       checks.installed = false;
       return result('The selected Codex executable could not be found.', 'Install Codex or correct its executable path, then check again.');
     }
@@ -67,7 +95,7 @@ export async function checkImageReadiness(choice, deps, dataDir) {
       return result('Codex did not provide a recognized ChatGPT sign-in status.');
     }
     checks.signedIn = true;
-    const features = await probe(bin, ['features', 'list'], env, cwd);
+    const features = await probe(launch, ['features', 'list']);
     const imageRows = features.output.split('\n').filter((line) => /^image_generation\s/.test(line));
     if (features.code === 0 && imageRows.length === 1 && /^image_generation\s+(?:stable|experimental|under development)\s+false$/.test(imageRows[0].trim())) {
       checks.imageCapability = false;
