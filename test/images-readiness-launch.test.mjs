@@ -115,3 +115,19 @@ setInterval(() => {}, 1000);
     assert.equal(isLive(pid), false, `${mode} left a live wrapper child after readiness returned`);
   });
 }
+
+test('timeout: readiness returns even when an escaped child keeps the output pipes open', { timeout: 10000 }, async (t) => {
+  // The child leaves the wrapper's process group (detached), so the group kill cannot reach it,
+  // and it inherits stdout/stderr, so the pipes never close while it lives.
+  const s = await launcher(t, (dir) => `
+const fs = require('node:fs');
+const { spawn } = require('node:child_process');
+const child = spawn(process.execPath, ['-e', "setInterval(() => {}, 1000);"], { detached: true, stdio: ['ignore', 'inherit', 'inherit'] });
+fs.writeFileSync(${JSON.stringify(path.join(dir, 'child.pid'))}, String(child.pid));
+setInterval(() => {}, 1000);
+`);
+  const start = Date.now();
+  const readiness = await s.check();
+  assert.equal(readiness.state, 'could_not_tell');
+  assert.ok(Date.now() - start < 6000, 'the probe resolves at its deadline, not when the pipes close');
+});

@@ -28,7 +28,23 @@ function probe(launch, args) {
       try { process.kill(-child.pid, 'SIGKILL'); }
       catch (e) { if (e.code !== 'ESRCH') errorCode = e.code; }
     };
-    const stop = () => { stopped = true; stdout = ''; stderr = ''; killGroup(); };
+    let settled = false;
+    const settle = (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ code, errorCode, output: `${stdout}\n${stderr}`.trim() });
+    };
+    // Resolve at the deadline itself: a descendant that left the group can hold the pipes open,
+    // so waiting for 'close' could delay the claim indefinitely.
+    const stop = () => {
+      stopped = true; stdout = ''; stderr = '';
+      killGroup();
+      child.stdout.destroy(); child.stderr.destroy();
+      // Let the group kill land (the wrapper's exit), but never wait on the pipes or past one second.
+      if (child.exitCode !== null || child.signalCode !== null) settle(-1);
+      else { child.once('exit', () => settle(-1)); setTimeout(() => settle(-1), 1000); }
+    };
     const timer = setTimeout(stop, 2500);
     const capture = (data, isStderr) => {
       if (stopped) return;
@@ -40,10 +56,9 @@ function probe(launch, args) {
     child.stderr.on('data', (data) => capture(data, true));
     child.on('error', (e) => { errorCode = e.code; });
     child.on('close', (code) => {
-      clearTimeout(timer);
+      if (settled) return; // stop() already signalled the group; never signal a released group ID.
       killGroup(); // Also clean up descendants whose wrapper exited without waiting for them.
-      resolve({ code: stopped || errorCode ? -1 : code ?? -1, errorCode,
-        output: `${stdout}\n${stderr}`.trim() });
+      settle(stopped || errorCode ? -1 : code ?? -1);
     });
   });
 }
