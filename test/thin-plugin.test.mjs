@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { ROOT, read, json, files, pngSize, hosts } from './helpers.mjs';
+import { TOOLS as IMAGE_TOOLS } from '../plugins/spreng-images/server/server.mjs';
 
 const P = 'plugins/spreng';
 const MCP_URL = 'https://app.spreng.io/mcp';
@@ -130,13 +131,16 @@ test('manifest and README directory links point at pages that exist', () => {
   assert.doesNotMatch(readme, /https:\/\/spreng\.io\/(docs|support)/, 'spreng.io has no docs or support page');
 });
 
-test('the skill names only connector tools and carries no method text', () => {
+test('the skill names only connector tools or the add-on readiness tool and carries no method text', () => {
   const { tools } = json('test/fixtures/spreng-mcp-tools.json');
   const skill = read(`${P}/skills/spreng/SKILL.md`);
   assert.match(skill, /^---\nname: spreng\ndescription: [^\n]+\n---\n/);
   const named = [...skill.matchAll(/`([a-z]+(?:_[a-z]+)+)`/g)].map((m) => m[1]).filter((n) => !['operationId'].includes(n));
-  for (const n of named) assert.ok(tools.includes(n), `skill names ${n}, which the connector does not have`);
-  assert.ok(skill.split('\n').length < 80, 'router stays short');
+  for (const n of named) {
+    const localReadiness = n === 'check_image_readiness' && IMAGE_TOOLS.some((t) => t.name === n);
+    assert.ok(tools.includes(n) || localReadiness, `skill names ${n}, which neither connector nor add-on provides`);
+  }
+  assert.ok(skill.split('\n').length < 85, 'router stays short including the A8 readiness gate');
 });
 
 test('R9-FABLE-05: sign-in routes claude.ai through its custom connector setup', () => {
@@ -181,8 +185,8 @@ test('first-run image setup precedes claim and gives Claude Code a concrete Code
   assert.match(skill, /claude plugin install spreng-images@spreng/);
   assert.match(skill, /choose Codex/);
   assert.match(skill, /imageSource: codex_cli/);
-  assert.match(skill, /codex login status/);
-  assert.match(skill, /does not verify sign-in or image capability/);
+  assert.match(skill, /Before `claim_native_image`, call `check_image_readiness`/);
+  assert.match(skill, /For ready, claim normally\. For could_not_tell, claim normally/);
   assert.match(skill, /account's own usage limits/);
   assert.match(skill, /list_native_runs/);
   assert.doesNotMatch(skill, /waitingFor: image_context|set_creative_rules|get_creative_rules/);

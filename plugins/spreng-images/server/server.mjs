@@ -13,6 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { SOURCES, secret, runCodex, runOpenAI, runKie, runOther } from './routes.mjs';
 import { canonicalPath, DEFAULT_MODELS, JOURNAL_DIR, recoverOperation } from './operations.mjs';
+import { checkImageReadiness } from './readiness.mjs';
 
 /** Run a program without a shell; resolves with its exit code and output. */
 export function runProcess(cmd, args, { timeoutMs } = {}) {
@@ -65,7 +66,14 @@ export const TOOLS = [
   {
     name: 'image_source_status',
     title: 'Image source status',
-    description: 'Shows which image source the user chose (codex, openai, kie or other, or none yet) and which sources are ready on this computer. Never shows a key.',
+    description: 'Shows the chosen image source and local configuration hints. Configuration does not prove readiness; call check_image_readiness before claim_native_image. Never shows a key.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  },
+  {
+    name: 'check_image_readiness',
+    title: 'Check image readiness',
+    description: 'Checks the selected source locally before claim_native_image. Returns ready, not_installed, not_signed_in, no_image_capability or could_not_tell, with reason and next. Only not_installed, not_signed_in and no_image_capability block a claim; ready and could_not_tell proceed. For could_not_tell, give the short notice in next. No provider request or image generation is made; a key or enabled feature alone cannot prove image access.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   },
@@ -116,12 +124,13 @@ export const TOOLS = [
 
 export async function callTool(name, args = {}, deps = defaultDeps()) {
   const env = deps.env;
+  if (name === 'check_image_readiness') return checkImageReadiness(await readChoice(deps), deps, dataDir(env));
   if (name === 'image_source_status') {
     const choice = await readChoice(deps);
     return {
       choice: choice?.source || null,
       otherName: choice?.otherName || undefined,
-      ready: {
+      configured: {
         codex: await onPath('codex', env, deps) || Boolean(secret(env.SPRENG_IMAGES_CODEX_BIN)),
         openai: Boolean(secret(env.SPRENG_IMAGES_OPENAI_KEY)),
         kie: Boolean(secret(env.SPRENG_IMAGES_KIE_KEY)),

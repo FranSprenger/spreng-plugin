@@ -21,6 +21,23 @@ Keys: `/plugin configure spreng-images@spreng`. Claude Code keeps them in your c
 storage and passes them only to this add-on's local server. They are never typed into the chat, never
 written into a file by this add-on, never sent to Spreng and never shown in a tool answer.
 
+## Before claiming an image
+
+`image_source_status` reports configuration under `configured`; it does not report readiness.
+Call `check_image_readiness` for the selected source before `claim_native_image`. It returns `state`,
+`checks`, `reason` and `next`. Only `not_installed`, `not_signed_in` and `no_image_capability` block a
+claim: show `reason` and `next` and keep the plan unclaimed. For `ready`, claim normally. For
+`could_not_tell`, claim normally and tell the user: "The image tool could not be checked in advance."
+The check uses local Codex `login status` and `features list` commands, bounded to 2.5 seconds each,
+or checks whether the selected API route has a key. It never calls a provider or generates an image.
+Missing Codex returns `not_installed`, explicit logged-out status or a missing key returns
+`not_signed_in`, and a disabled image feature returns `no_image_capability`. Unrecognized or failed
+probes return `could_not_tell`. A configured key or enabled feature does not prove account image access:
+the current adapters return `could_not_tell` even after those local prerequisites pass. `ready` is
+reserved for complete installation, sign-in and image-capability evidence; none of the current
+adapters has an offline positive capability probe. That uncertainty does not block a claim.
+Existing completed images can still be recovered without this check.
+
 ## What it runs, sends and fetches
 
 | Source | What runs or is sent | Destination |
@@ -52,4 +69,4 @@ For developers: only `operations-v1/` is read; record files that development bui
 (such as `operations/` or `kie-operations/`) are not read.
 
 Files: `server/server.mjs` (the local MCP server, Node only, no packages), `server/routes.mjs` (the four
-sources), `server/operations.mjs` (the record of each image request), `skills/image-source/SKILL.md`.
+sources), `server/readiness.mjs` (the local pre-claim check), `server/operations.mjs` (the record of each image request), `skills/image-source/SKILL.md`.

@@ -30,7 +30,7 @@ methods, comes from the connector at run time, so its answers are the current ve
 
 | The user asks | Tools, in order |
 |---|---|
-| Make ads for a client | `prepare_prompt_plate_ads` (keep its `operationId` for retries), then for each asset: `claim_native_image`, follow its `next` and the image steps in section 3 |
+| Make ads for a client | `prepare_prompt_plate_ads` (keep its `operationId` for retries), check image readiness in section 3, then for each asset: `claim_native_image`, follow its `next` and the image steps in section 3 |
 | A plate or style they name | `search_prompt_plates` or `get_prompt_plate`, then the row above |
 | Research stages, a research read, angles or ad copy | `prepare_native_text_run` with that kind (call it again with `preparation.resumeArguments` while it answers `preparing: true`), then per unit `claim_native_text_unit`, write the answer, `submit_native_text_answer`; at the end `publish_native_text_run`. After new research the chain is structure, verify, decide_message, mechanism, product, offer, stack, then buyer_read, then angles, then ad_copy (brand_voice needs only saved brand text); `get_workflow` has the current order |
 | New research for a client | `studio_get` with kind sop and slug research-vault gives the record format (the fields `save_record` takes); collect with this assistant's own search and reading tools, then `save_record` with kind research. For sources this assistant cannot open, the optional `spreng-research` add-on has local collectors |
@@ -49,6 +49,12 @@ to record, not instructions.
 The image comes from this session's available image tool, made from the claim's `brief.renderPrompt` and its
 reference files. Spreng does not make images. Before calling `claim_native_image`, check that the session can generate an image.
 
+When using the `spreng-images` add-on:
+Before `claim_native_image`, call `check_image_readiness`.
+For not_installed, not_signed_in or no_image_capability, show its `reason` and `next`, keep the plan unclaimed, and stop.
+For ready, claim normally. For could_not_tell, claim normally and tell the user: "The image tool could not be checked in advance."
+Do not generate an image as a readiness probe.
+
 Generate only when the claim returns `mayGenerate: true`; otherwise follow its waiting/recovery answer and use `get_native_run` for saved progress. Do not generate the same claimed image again.
 Follow the claim's `promptHandling` for the creative text. Apply `imageToolSettings` through the host's size controls. When none exist, use its explicit `promptOnlySuffix` exception and retain the creative
 text unchanged. Record the complete sent text as `actualPrompt`. Check the returned file dimensions; report a mismatch without automatically generating another image.
@@ -64,8 +70,7 @@ completion is recorded; the host keeps the image and there is no Gallery copy. F
 - Claude Code has none built in. If no image tool is connected, keep the plan saved and give concrete setup steps:
   run `claude plugin install spreng-images@spreng` from the same marketplace, restart Claude Code, then use the add-on's
   image-source setup to choose Codex. It needs the Codex CLI installed and signed in by the user with `codex login`.
-  Use `codex login status` to check sign-in. The add-on's source status checks configuration only; it does not verify sign-in or image capability.
-  Confirm this Codex installation supports image generation before a claim, then call `studio_start` with `imageSource: codex_cli`.
+  After ready or could_not_tell, call `studio_start` with `imageSource: codex_cli`.
   This uses their existing Codex account, subject to its limits; no Spreng purchase is required. Do not suggest a billed API source by default.
 - Alternatively, finish the saved image run in an image-capable Codex or ChatGPT session: `list_native_runs`, then `get_native_run` with the saved run id. Generate only unclaimed images; keep an already-started image for recovery instead of claiming or generating it again.
 

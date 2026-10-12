@@ -39,7 +39,7 @@ test('no choice yet: make_image asks for set_image_source; status shows nothing 
   });
   const s = await callTool('image_source_status', {}, deps);
   assert.equal(s.choice, null);
-  assert.equal(s.ready.openai, true);
+  assert.equal(s.configured.openai, true);
   assert.ok(!JSON.stringify(s).includes(OPENAI_KEY));
 });
 
@@ -527,9 +527,9 @@ test('model-facing wording: the spreng-images tool descriptions and the image-so
   assert.doesNotMatch(make.inputSchema.properties.operationId.description, /switching source/);
   const skill = await fs.readFile(path.join(ROOT, 'plugins/spreng-images/skills/image-source/SKILL.md'));
   assert.doesNotMatch(String(skill), /also after switching source/);
-  assert.equal(hash(JSON.stringify(TOOLS)), 'ad52c15a1370d3894747af25db509070a38afe6ead71019cda05932b838781b0', 'tool descriptions with R6-ASTRA2-07 local receipt recovery; R14-astra-04 operationId names the claim assetId');
+  assert.equal(hash(JSON.stringify(TOOLS)), 'd8e04917ec9ee212a01fb6109485e975a9ad4c4d9c1c20bbedccfb152a6faf5d', 'FX2A8IMG permits unknown readiness and blocks only proven missing prerequisites; existing generation text unchanged');
   // LOOP-99 R2 (chair, 2026-10-09): the sentence about the web app's own Creative rules setting was removed; plugin
   // users are on the connector, where it does not apply. Removal only, no new wording.
   assert.match(String(skill), /connector always sends the Prompt Plate plus your own inputs\. Prompt handling/);
-  assert.equal(hash(skill), '4ea6f982ab8c79150660f4c534d5d678070572b85a2dba7ec574cc6ff8469049', 'image-source skill with H2 setup, approved shape transport, connector policy, R7-fable-05 local recovery guidance and R14-astra-04 assetId naming');
+  assert.equal(hash(skill), '35c7121ad61bd51dd8d2dba154e6844bdee8d6452d63fd0670bfaa7c2bb0852f', 'FX2A8IMG permits an unknown-state claim with a factual notice; existing creative instructions unchanged');
 });
