@@ -31,8 +31,15 @@ export function toVault(results, { title = 'Host research', maxBytes = 512 * 102
     current = next;
   };
   results.forEach((result, index) => {
-    const { quotes = [], documents = [], competitors = [], proof = [], quantified_stakes = [], ...receipt } = result;
+    const { quotes = [], documents = [], competitors = [], proof = [], quantified_stakes = [], collectorOutputs, ...receipt } = result;
     const source = { ...receipt, id: `${index + 1}:${result.id || 'source'}`, status: result.status || 'ok', itemCount: quotes.length + documents.length + competitors.length + proof.length + quantified_stakes.length };
+    if (collectorOutputs !== undefined) {
+      // Each report keeps its own root output, including repeated collector names across results.
+      finish();
+      current = { schemaVersion: '1', sources: [source], collectorOutputs };
+      if (bytes(current) > maxBytes - 200) throw new Error('One structured entry exceeds the vault payload size; split its original fields before saving');
+      finish();
+    }
     // Preserve diagnostics and collector-specific structures rather than silently dropping them.
     for (const [field, entries] of Object.entries({ quotes, documents, competitors, proof, quantified_stakes })) {
       for (const raw of entries) {

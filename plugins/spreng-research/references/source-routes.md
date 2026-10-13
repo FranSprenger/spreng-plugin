@@ -1,5 +1,7 @@
 # Host collection routes
 
+Never solve or bypass a CAPTCHA, login wall or block, and respect robots/blocked responses; when blocked, use the listed fallback or ask the user for an export.
+
 Use the selected client and the current get_workflow sourceCollectionPlan. Browser connector, built-in browser and web fetch are alternatives according to this host’s capabilities. Local scripts are optional. Follow visible pagination and replies, save partial progress and observed continuations, and distinguish blocked, failed, skipped, no matching items and partial pages.
 
 | App source | Target | Route | Fallback | Save shape |
