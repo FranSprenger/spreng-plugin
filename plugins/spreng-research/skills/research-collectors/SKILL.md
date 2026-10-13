@@ -43,3 +43,7 @@ The command writes ordered payload parts and a manifest. Call save_record with t
 kind research, the manifest title/operationId and each payload. Keep these ids for retries. Read back
 with get_records includePayload true, following payload parts, then pass every researchRecordId
 through the native stages and ad preparation. Failed and partial source receipts remain saved.
+
+Work systematically through all source routes on a best-effort basis. Note failed or blocked sources
+and continue with available evidence and offer facts. After saving research, complete and publish
+the missing native stages and angles, then continue to ad preparation as described by get_workflow.

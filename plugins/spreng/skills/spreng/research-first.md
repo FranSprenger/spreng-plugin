@@ -5,7 +5,10 @@ Tell the user which saved research and angles you are checking or collecting. Re
 `get_workflow(clientId)` for source tasks and state. Reuse suitable saved work; missing or stale work is
 part of the ad request, not a separate permission question. Use the customer's browser connector,
 built-in browser, search or web fetch for missing sources. The optional local collectors are not required.
-The workflow's sourceCollectionPlan covers all 15 app sources and each blocked-source fallback.
+Work systematically through the workflow's sourceCollectionPlan, covering all 15 app sources on a
+best-effort basis. Note each failed or blocked source, try an available fallback and continue to the
+next source. Continue with available evidence and offer facts through saved research, saved angles
+and ad preparation even when some sources could not complete.
 
 Save collected evidence and failed/blocked/skipped receipts with `save_record(kind: research)` and read
 it back. Keep one complete bundle and all its `researchRecordIds`, including every split part, through
