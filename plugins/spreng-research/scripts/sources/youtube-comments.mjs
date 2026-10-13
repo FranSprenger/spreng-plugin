@@ -33,8 +33,8 @@ export function findAll(o, key, acc = []) {
 
 const views = (s) => Number(String(s || '').replace(/[^\d]/g, '')) || 0;
 
-export async function youtubeComments({ query, videos = 2, pace = 3000 }, { fetch = globalThis.fetch, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
-  const result = { id: 'youtube-comments', label: 'YouTube comments', kind: 'social', status: 'ok', retrievedAt: new Date().toISOString(), quotes: [] };
+export async function youtubeComments({ query, videos = 2, pages = 1, pace = 3000 }, { fetch = globalThis.fetch, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), checkpoint = async () => {} } = {}) {
+  const result = { platform: 'youtube_comments', collector: 'pull-youtube-comments', raw_record: { continuations: [] }, id: 'youtube-comments', label: 'YouTube comments', kind: 'social', status: 'ok', retrievedAt: new Date().toISOString(), quotes: [] };
   if (!query) return { ...result, status: 'skipped', reason: 'no search words given' };
   const headers = { 'accept-language': 'en' };
   const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
@@ -56,8 +56,9 @@ export async function youtubeComments({ query, videos = 2, pace = 3000 }, { fetc
     const clientVersion = (html.match(/"INNERTUBE_CLIENT_VERSION":"([^"]+)"/) || [])[1];
     const initial = pageJson(html, 'ytInitialData');
     const section = findAll(initial, 'itemSectionRenderer').find((s) => s.sectionIdentifier === 'comment-item-section');
-    const token = section ? findAll(section, 'token')[0] : undefined;
+    let token = section ? findAll(section, 'token')[0] : undefined;
     if (!token || !clientVersion) { notes.push(`no comment section on ${url}`); return; }
+    for (let page = 0; token && page < pages; page++) {
     await sleep(pace);
     const c = await fetch(`https://www.youtube.com/youtubei/v1/next${key ? `?key=${key}` : ''}`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
@@ -66,10 +67,17 @@ export async function youtubeComments({ query, videos = 2, pace = 3000 }, { fetc
     if (!c.ok) { notes.push(`HTTP ${c.status} reading comments of ${url}`); return; }
     let body;
     try { body = await c.json(); } catch { notes.push(`unreadable comment reply for ${url}`); return; }
-    let texts = findAll(body, 'commentEntityPayload').map((p) => p?.properties?.content?.content).filter(Boolean);
-    if (!texts.length) texts = findAll(body, 'commentRenderer').map((p) => (p?.contentText?.runs || []).map((x) => x.text).join('')).filter(Boolean);
-    for (const text of texts) addQuote(result, { text, url, context: `YouTube comment on "${video.title}"`.slice(0, 1000) });
-    if (!texts.length) notes.push(`no comments returned for ${url}`);
+    let comments = findAll(body, 'commentEntityPayload').map(p => ({ text: p?.properties?.content?.content, id: p?.properties?.commentId, author: p?.author?.displayName, raw: p }));
+    if (!comments.some(p => p.text)) comments = findAll(body, 'commentRenderer').map(p => ({ text: (p?.contentText?.runs || []).map(x => x.text).join(''), id: p.commentId, author: p.authorText?.simpleText, raw: p }));
+    for (const p of comments.filter(p => p.text)) addQuote(result, { text: p.text, url: p.id ? `${url}&lc=${p.id}` : url, provider_item_id: p.id, parent_id: video.id, author: p.author, raw_record: p.raw, captured_at: result.retrievedAt, context: `YouTube comment on "${video.title}"`.slice(0, 1000) });
+    token = findAll(body, 'continuationItemRenderer').flatMap(p => findAll(p, 'token'))[0];
+    result.raw_record.continuations = result.raw_record.continuations.filter(p => p.videoId !== video.id);
+    if (token) result.raw_record.continuations.push({ videoId: video.id, token, url, clientVersion });
+    result.coverage = `Read through comment page ${page + 1}; replies and other pages only when returned`;
+    await checkpoint(result);
+    if (!comments.some(p => p.text)) notes.push(`no comments returned for ${url}`);
+    }
+
   }
   for (const video of found.sort((a, b) => b.views - a.views).slice(0, videos)) {
     const url = `https://www.youtube.com/watch?v=${video.id}`;

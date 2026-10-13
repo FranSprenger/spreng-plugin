@@ -27,3 +27,19 @@ In Codex the scripts need network access: ask the user to allow it.
 | YouTube comments | `node SCRIPTS/collect.mjs youtube --query "<words>" --out <dir>` | First page of comments on the most viewed videos the search finds |
 
 A source that fails writes its file with `status` and `reason` and the run goes on to the next one.
+
+## Save collected sources in Spreng
+
+For every ad task, check get_workflow(clientId) and reuse suitable saved research and angles first.
+For missing or stale sources, use [source routes](../../references/source-routes.md), including the
+customer's browser connector or built-in browser when available. No local installation is required.
+Local output files are not automatically ingested. Convert them with:
+
+```sh
+node scripts/to-vault.mjs --out research/vault research/sources/*.json
+```
+
+The command writes ordered payload parts and a manifest. Call save_record with the same clientId,
+kind research, the manifest title/operationId and each payload. Keep these ids for retries. Read back
+with get_records includePayload true, following payload parts, then pass every researchRecordId
+through the native stages and ad preparation. Failed and partial source receipts remain saved.

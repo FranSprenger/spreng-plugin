@@ -12,7 +12,7 @@ const P = 'plugins/spreng';
 const MCP_URL = 'https://app.spreng.io/mcp';
 const ALLOWED = [
   '.claude-plugin/plugin.json', 'LICENSE', 'README.md', 'assets/icon.png',
-  'mcp.json', 'plugin.json', 'skills/spreng/SKILL.md',
+  'mcp.json', 'plugin.json', 'skills/spreng/SKILL.md', 'skills/spreng/research-first.md',
 ].map((f) => path.join(P, f)).sort();
 
 // R2-fable-07: logo.png was a byte-identical copy of icon.png. The OpenAI interface takes a path per field, so both

@@ -22,11 +22,18 @@ export async function main(argv, deps = {}) {
   const out = get('out');
   const query = get('query');
   if (!['reddit', 'youtube'].includes(source) || !out) throw new Error('usage: collect.mjs reddit|youtube --query "<words>" --out <dir>');
+  await fs.mkdir(out, { recursive: true });
+  const checkpoint = async result => {
+    const file = path.join(out, `${result.id}.json`);
+    await fs.writeFile(`${file}.tmp`, JSON.stringify(result, null, 2));
+    await fs.rename(`${file}.tmp`, file);
+  };
+  deps = { ...deps, checkpoint };
   let result;
   try {
     result = source === 'reddit'
       ? await reddit({ query, threads: Number(get('threads') || 3), ...(deps.pace !== undefined ? { pace: deps.pace } : {}) }, deps)
-      : await youtubeComments({ query, videos: Number(get('videos') || 2), ...(deps.pace !== undefined ? { pace: deps.pace } : {}) }, deps);
+      : await youtubeComments({ query, videos: Number(get('videos') || 2), pages: Number(get('pages') || 1), ...(deps.pace !== undefined ? { pace: deps.pace } : {}) }, deps);
   } catch (e) {
     const id = source === 'reddit' ? 'reddit' : 'youtube-comments';
     result = { id, label: id, kind: 'social', status: 'failed', reason: String(e?.message || e).slice(0, 500), quotes: [] };

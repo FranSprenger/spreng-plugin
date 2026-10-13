@@ -101,7 +101,7 @@ export async function saveMedia(ads, dir, { fetch = globalThis.fetch, sleep = (m
 
 /** The research source file for these ads (the recipe's `research/sources/<id>.json` shape). */
 export function sourceResult(ads, { url, notes = [], retrievedAt = new Date().toISOString() } = {}) {
-  const result = { id: 'meta-ads', label: 'Meta Ad Library (logged out, first batch)', kind: 'ad_library', status: 'ok', retrievedAt, url, competitors: [] };
+  const result = { platform: 'ad_library', collector: 'scan-ad-library', coverage: 'First embedded batch only; use browser continuation for further pages', id: 'meta-ads', label: 'Meta Ad Library (logged out, first batch)', kind: 'ad_library', status: 'ok', retrievedAt, url, competitors: [] };
   if (!ads.length) {
     result.status = 'failed';
     result.reason = documentExcerpt(result, notes.join('; ') || 'no ads could be read from the Ad Library page', 1000, 'Meta Ad Library diagnostics', url);
@@ -113,6 +113,10 @@ export function sourceResult(ads, { url, notes = [], retrievedAt = new Date().to
     if (!byPage.has(key)) byPage.set(key, { name: ad.page || key, url: ad.pageId ? libraryUrl({ pageId: ad.pageId }) : url, ads: [] });
     byPage.get(key).ads.push({
       headline: ad.title || undefined,
+      platform: 'ad_library', provider_item_id: ad.id, target_name: ad.page,
+      target_role: 'competitor', voice_class: 'seller', captured_at: retrievedAt,
+      source_created_at: ad.start ? `${ad.start}T00:00:00.000Z` : undefined,
+      raw_record: Object.fromEntries(Object.entries(ad).filter(([key]) => key !== "body")),
       text: documentExcerpt(result, ad.body, 8000, `Ad ${ad.id} text`, `${LIBRARY}?id=${ad.id}`) || undefined,
       format: ad.format || undefined,
       url: `${LIBRARY}?id=${ad.id}`,

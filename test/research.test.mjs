@@ -70,7 +70,12 @@ test('the source file has the research shape: competitors with ads, first-batch 
   assert.equal(r.status, 'ok');
   assert.match(r.reason, /first batch only: 2 ads/);
   assert.deepEqual(Object.keys(r.competitors[0]), ['name', 'url', 'ads']);
-  assert.deepEqual(r.competitors[0].ads[0], { headline: 'Card title', text: 'The real card copy.', format: 'DCO', url: 'https://www.facebook.com/ads/library/?id=11', firstSeen: '2026-06-27' });
+  const { platform, provider_item_id, target_name, target_role, voice_class, captured_at, source_created_at, raw_record, ...savedAd } = r.competitors[0].ads[0];
+  assert.equal(platform, 'ad_library');
+  assert.equal(provider_item_id, '11');
+  assert.equal(source_created_at, '2026-06-27T00:00:00.000Z');
+  assert.deepEqual(raw_record, Object.fromEntries(Object.entries(ads[0]).filter(([key]) => key !== "body")));
+  assert.deepEqual(savedAd, { headline: 'Card title', text: 'The real card copy.', format: 'DCO', url: 'https://www.facebook.com/ads/library/?id=11', firstSeen: '2026-06-27' });
   assert.equal(sourceResult([], { notes: ['Playwright is not installed'] }).status, 'failed');
 });
 
@@ -208,4 +213,27 @@ test('R6-ASTRA2-02: the collector keeps a transcript longer than the quote field
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
+});
+
+test('MCPBUILD: YouTube follows observed continuation and checkpoints identity before a blocked page', async () => {
+  const { youtubeComments } = await import('../plugins/spreng-research/scripts/sources/youtube-comments.mjs');
+  const checkpoints = [];
+  const tokens = [];
+  const result = await youtubeComments({ query: 'test', videos: 1, pages: 3, pace: 0 }, {
+    sleep: async () => {}, checkpoint: async r => checkpoints.push(JSON.parse(JSON.stringify(r))),
+    fetch: async (url, init) => {
+      if (url.includes('/results?')) return { ok: true, text: async () => 'ytInitialData = {"videoRenderer":{"videoId":"v1","title":{"runs":[{"text":"Video"}]}}};' };
+      if (url.includes('/watch?')) return { ok: true, text: async () => '"INNERTUBE_CLIENT_VERSION":"1"; ytInitialData = {"itemSectionRenderer":{"sectionIdentifier":"comment-item-section","token":"page1"}};' };
+      const token = JSON.parse(init.body).continuation; tokens.push(token);
+      if (token === 'page2') return { ok: false, status: 403 };
+      return { ok: true, json: async () => ({ commentRenderer: { commentId: 'c1', authorText: { simpleText: 'Author' }, contentText: { runs: [{ text: 'Original words' }] } }, continuationItemRenderer: { token: 'page2' } }) };
+    },
+  });
+  assert.deepEqual(tokens, ['page1', 'page2']);
+  assert.equal(result.quotes[0].provider_item_id, 'c1');
+  assert.equal(result.quotes[0].parent_id, 'v1');
+  assert.equal(result.quotes[0].author, 'Author');
+  assert.equal(checkpoints[0].quotes[0].text, 'Original words');
+  assert.equal(checkpoints[0].raw_record.continuations[0].token, 'page2');
+  assert.match(result.reason, /403/);
 });
