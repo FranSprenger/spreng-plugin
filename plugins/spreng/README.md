@@ -10,8 +10,8 @@ from saved research: Spreng prepares each step, your assistant writes the answer
 your account.
 
 For accounts that keep no generated images, including the reviewer account, your assistant keeps the
-image files. Spreng records completion with `finalize_native_image`; there is no generated-image upload
-or Gallery copy. Earlier plans and completion status are available through `list_native_runs` and
+image files. Spreng records completion with `finalize_native_image`; Spreng keeps no copy of the
+image. Earlier plans and completion status are available through `list_native_runs` and
 `get_native_run`. The assistant follows the account's served next step; it uploads a generated image
 only when that step provides a signed upload URL.
 

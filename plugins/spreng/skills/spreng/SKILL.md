@@ -64,7 +64,7 @@ the file only if it returns `signedUrl`, with the file's Content-Type and no add
 When the claim goes straight to `finalize_native_image`, or upload answers `uploadNeeded: false`, skip
 the upload. Call `finalize_native_image` with `assetId`, `actualPrompt` and `host`, plus any other details
 its schema requests. `recorded: true`, `imageStored: false` (or `alreadyRecorded` on a repeat) means the
-completion is recorded; the host keeps the image and there is no Gallery copy. Follow any
+completion is recorded; the host keeps the image and Spreng keeps no copy. Follow any
 `alreadyCompleted` answer to the saved run instead of generating again.
 
 - Codex and ChatGPT may provide a built-in image tool; check this session's tools and the account's own usage limits.

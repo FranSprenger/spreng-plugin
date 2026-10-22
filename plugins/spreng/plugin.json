@@ -57,13 +57,13 @@
               "description": "Make ad images from saved research",
               "prompt": "Make two ads for Brindlefen Candle Co. from my saved Spreng research.",
               "tools_triggered": "list_clients, get_client, prepare_prompt_plate_ads, claim_native_image, finalize_native_image",
-              "expected_behavior": "Prepares a saved plan for Brindlefen Candle Co., makes each image with the host's own image tool from the plan's prompt and reference files, and calls finalize_native_image for each image with assetId, actualPrompt and host. The reviewer account returns recorded:true and imageStored:false: the image stays with the host, with no upload or Gallery copy; does not run new research."
+              "expected_behavior": "Prepares a saved plan for Brindlefen Candle Co., makes each image with the host's own image tool from the plan's prompt and reference files, and calls finalize_native_image for each image with assetId, actualPrompt and host. The reviewer account returns recorded:true and imageStored:false: the image stays with the host, and Spreng keeps no copy; does not run new research."
             },
             {
               "description": "Use a Prompt Plate the user names",
               "prompt": "Find a before and after Prompt Plate in Spreng and use it for one Brindlefen Candle Co. ad.",
               "tools_triggered": "search_prompt_plates, get_prompt_plate, prepare_prompt_plate_ads, claim_native_image, finalize_native_image",
-              "expected_behavior": "Shows the matching plates, uses the one the user picks for a one-image plan, and makes that image with the host's own image tool. Calls finalize_native_image to record completion; the reviewer account keeps the image with the host, with no upload or Gallery copy."
+              "expected_behavior": "Shows the matching plates, uses the one the user picks for a one-image plan, and makes that image with the host's own image tool. Calls finalize_native_image to record completion; the reviewer account keeps the image with the host, and Spreng keeps no copy."
             },
             {
               "description": "Write angles from saved research",

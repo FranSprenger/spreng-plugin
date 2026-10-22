@@ -164,7 +164,8 @@ test('image review cases use receipt completion without generated-image uploads'
     assert.ok(c.tools_triggered.includes('finalize_native_image'));
     assert.ok(!c.tools_triggered.includes('create_native_image_upload'));
     assert.match(c.expected_behavior, /image stays with the host|image with the host/);
-    assert.match(c.expected_behavior, /no upload or Gallery copy/);
+    assert.match(c.expected_behavior, /Spreng keeps no copy/);
+    assert.doesNotMatch(c.expected_behavior, /Gallery/);
   }
 });
 
@@ -175,7 +176,7 @@ test('both image routers follow served completion steps and preserve the host fi
     assert.match(skill, /only (?:if|when) it returns `signedUrl`/);
     assert.match(skill, /`uploadNeeded: false`/);
     assert.match(skill, /`assetId`, `actualPrompt` and `host`/);
-    assert.match(skill, /no Gallery copy|without a Gallery copy/);
+    assert.match(skill, /Spreng keeps no copy|without a Gallery copy/);
   }
 });
 
