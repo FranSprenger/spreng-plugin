@@ -111,9 +111,9 @@ test('review cases name the brand the reviewer account is seeded with', () => {
 // /contact, and renders "Page not found" for /docs/plugin and /support.
 const DIRECTORY_PAGES = {
   docs: 'https://app.spreng.io/docs/plugin',
-  support: 'https://app.spreng.io/support',
-  privacy: 'https://app.spreng.io/privacy',
-  terms: 'https://app.spreng.io/terms',
+  support: 'https://spreng.io/contact',
+  privacy: 'https://spreng.io/privacy',
+  terms: 'https://spreng.io/terms',
 };
 
 test('manifest and README directory links point at pages that exist', () => {

@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "spreng",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Connects your Spreng account: Spreng prepares research reads, angles and ad image plans from your saved offer, your own assistant writes the text and makes the images with its own tools, and Spreng saves your research, angles and plans.",
   "author": {
     "name": "Fran Sprenger",
@@ -31,9 +31,9 @@
           "Save research, angles and plans"
         ],
         "websiteURL": "https://spreng.io",
-        "supportURL": "https://app.spreng.io/support",
-        "privacyPolicyURL": "https://app.spreng.io/privacy",
-        "termsOfServiceURL": "https://app.spreng.io/terms",
+        "supportURL": "https://spreng.io/contact",
+        "privacyPolicyURL": "https://spreng.io/privacy",
+        "termsOfServiceURL": "https://spreng.io/terms",
         "defaultPrompt": [
           "Show me my Spreng clients.",
           "Make three ads for my offer from my saved Spreng research.",
